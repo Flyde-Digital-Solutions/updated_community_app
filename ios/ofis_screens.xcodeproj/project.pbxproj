@@ -7,10 +7,16 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		0C80B921A6F3F58F76C31292 /* libPods-ofis_screens.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 5DCACB8F33CDC322A6C60F78 /* libPods-ofis_screens.a */; };
 		13B07FBF1A68108700A75B9A /* Images.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 13B07FB51A68108700A75B9A /* Images.xcassets */; };
+		29897B06CB1341D3A437B3AA /* SequelSans-BookBody.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 8949A03C9BA94F078E359F7E /* SequelSans-BookBody.ttf */; };
+		36C3AC24E4D54BCF9A8DE60E /* SequelSans-LightBody.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 3181EA542C83402B882D1EFF /* SequelSans-LightBody.ttf */; };
+		40D554485924F9B566FF3EF1 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 13B07FB81A68108700A75B9A /* PrivacyInfo.xcprivacy */; };
+		600334AB5D1B426CB332AA47 /* SequelSans-SemiBoldHead.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 80C8389DED84429D866352B0 /* SequelSans-SemiBoldHead.ttf */; };
 		761780ED2CA45674006654EE /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 761780EC2CA45674006654EE /* AppDelegate.swift */; };
 		81AB9BB82411601600AC10FF /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 81AB9BB72411601600AC10FF /* LaunchScreen.storyboard */; };
+		AC8DB9123E57484F87492124 /* SequelSans-SemiBoldBody.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 48D813E4863C4B1EA0A519FE /* SequelSans-SemiBoldBody.ttf */; };
+		BE7B5489F86F7241C4AD6242 /* libPods-ofis_screens.a in Frameworks */ = {isa = PBXBuildFile; fileRef = ADD7A57BAD7C3DC05BCCC3C6 /* libPods-ofis_screens.a */; };
+		CF67C80A2C0C484A8C7FFF83 /* SequelSans-MediumBody.ttf in Resources */ = {isa = PBXBuildFile; fileRef = CA2DD098AE1B4070A7BD4B12 /* SequelSans-MediumBody.ttf */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -18,11 +24,16 @@
 		13B07FB51A68108700A75B9A /* Images.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; name = Images.xcassets; path = ofis_screens/Images.xcassets; sourceTree = "<group>"; };
 		13B07FB61A68108700A75B9A /* Info.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; name = Info.plist; path = ofis_screens/Info.plist; sourceTree = "<group>"; };
 		13B07FB81A68108700A75B9A /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; name = PrivacyInfo.xcprivacy; path = ofis_screens/PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
-		3B4392A12AC88292D35C810B /* Pods-ofis_screens.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-ofis_screens.debug.xcconfig"; path = "Target Support Files/Pods-ofis_screens/Pods-ofis_screens.debug.xcconfig"; sourceTree = "<group>"; };
-		5709B34CF0A7D63546082F79 /* Pods-ofis_screens.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-ofis_screens.release.xcconfig"; path = "Target Support Files/Pods-ofis_screens/Pods-ofis_screens.release.xcconfig"; sourceTree = "<group>"; };
-		5DCACB8F33CDC322A6C60F78 /* libPods-ofis_screens.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-ofis_screens.a"; sourceTree = BUILT_PRODUCTS_DIR; };
+		2A7445FBDFD640157C9DED1F /* Pods-ofis_screens.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-ofis_screens.debug.xcconfig"; path = "Target Support Files/Pods-ofis_screens/Pods-ofis_screens.debug.xcconfig"; sourceTree = "<group>"; };
+		3181EA542C83402B882D1EFF /* SequelSans-LightBody.ttf */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = undefined; includeInIndex = 0; lastKnownFileType = unknown; name = "SequelSans-LightBody.ttf"; path = "../src/assets/fonts/SequelSans-LightBody.ttf"; sourceTree = "<group>"; };
+		37945EB27D83482696A0B2C3 /* Pods-ofis_screens.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-ofis_screens.release.xcconfig"; path = "Target Support Files/Pods-ofis_screens/Pods-ofis_screens.release.xcconfig"; sourceTree = "<group>"; };
+		48D813E4863C4B1EA0A519FE /* SequelSans-SemiBoldBody.ttf */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = undefined; includeInIndex = 0; lastKnownFileType = unknown; name = "SequelSans-SemiBoldBody.ttf"; path = "../src/assets/fonts/SequelSans-SemiBoldBody.ttf"; sourceTree = "<group>"; };
 		761780EC2CA45674006654EE /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AppDelegate.swift; path = ofis_screens/AppDelegate.swift; sourceTree = "<group>"; };
+		80C8389DED84429D866352B0 /* SequelSans-SemiBoldHead.ttf */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = undefined; includeInIndex = 0; lastKnownFileType = unknown; name = "SequelSans-SemiBoldHead.ttf"; path = "../src/assets/fonts/SequelSans-SemiBoldHead.ttf"; sourceTree = "<group>"; };
 		81AB9BB72411601600AC10FF /* LaunchScreen.storyboard */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = file.storyboard; name = LaunchScreen.storyboard; path = ofis_screens/LaunchScreen.storyboard; sourceTree = "<group>"; };
+		8949A03C9BA94F078E359F7E /* SequelSans-BookBody.ttf */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = undefined; includeInIndex = 0; lastKnownFileType = unknown; name = "SequelSans-BookBody.ttf"; path = "../src/assets/fonts/SequelSans-BookBody.ttf"; sourceTree = "<group>"; };
+		ADD7A57BAD7C3DC05BCCC3C6 /* libPods-ofis_screens.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-ofis_screens.a"; sourceTree = BUILT_PRODUCTS_DIR; };
+		CA2DD098AE1B4070A7BD4B12 /* SequelSans-MediumBody.ttf */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = undefined; includeInIndex = 0; lastKnownFileType = unknown; name = "SequelSans-MediumBody.ttf"; path = "../src/assets/fonts/SequelSans-MediumBody.ttf"; sourceTree = "<group>"; };
 		ED297162215061F000B7C4FE /* JavaScriptCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = JavaScriptCore.framework; path = System/Library/Frameworks/JavaScriptCore.framework; sourceTree = SDKROOT; };
 /* End PBXFileReference section */
 
@@ -31,7 +42,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				0C80B921A6F3F58F76C31292 /* libPods-ofis_screens.a in Frameworks */,
+				BE7B5489F86F7241C4AD6242 /* libPods-ofis_screens.a in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -54,7 +65,7 @@
 			isa = PBXGroup;
 			children = (
 				ED297162215061F000B7C4FE /* JavaScriptCore.framework */,
-				5DCACB8F33CDC322A6C60F78 /* libPods-ofis_screens.a */,
+				ADD7A57BAD7C3DC05BCCC3C6 /* libPods-ofis_screens.a */,
 			);
 			name = Frameworks;
 			sourceTree = "<group>";
@@ -74,6 +85,7 @@
 				83CBBA001A601CBA00E9B192 /* Products */,
 				2D16E6871FA4F8E400B85C8A /* Frameworks */,
 				BBD78D7AC51CEA395F1C20DB /* Pods */,
+				A9DD989C452645938C3C49B3 /* Resources */,
 			);
 			indentWidth = 2;
 			sourceTree = "<group>";
@@ -88,11 +100,24 @@
 			name = Products;
 			sourceTree = "<group>";
 		};
+		A9DD989C452645938C3C49B3 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				80C8389DED84429D866352B0 /* SequelSans-SemiBoldHead.ttf */,
+				8949A03C9BA94F078E359F7E /* SequelSans-BookBody.ttf */,
+				CA2DD098AE1B4070A7BD4B12 /* SequelSans-MediumBody.ttf */,
+				3181EA542C83402B882D1EFF /* SequelSans-LightBody.ttf */,
+				48D813E4863C4B1EA0A519FE /* SequelSans-SemiBoldBody.ttf */,
+			);
+			name = Resources;
+			path = "";
+			sourceTree = "<group>";
+		};
 		BBD78D7AC51CEA395F1C20DB /* Pods */ = {
 			isa = PBXGroup;
 			children = (
-				3B4392A12AC88292D35C810B /* Pods-ofis_screens.debug.xcconfig */,
-				5709B34CF0A7D63546082F79 /* Pods-ofis_screens.release.xcconfig */,
+				2A7445FBDFD640157C9DED1F /* Pods-ofis_screens.debug.xcconfig */,
+				37945EB27D83482696A0B2C3 /* Pods-ofis_screens.release.xcconfig */,
 			);
 			path = Pods;
 			sourceTree = "<group>";
@@ -104,13 +129,13 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = 13B07F931A680F5B00A75B9A /* Build configuration list for PBXNativeTarget "ofis_screens" */;
 			buildPhases = (
-				C38B50BA6285516D6DCD4F65 /* [CP] Check Pods Manifest.lock */,
+				D08A85EA37A4F426F4865F79 /* [CP] Check Pods Manifest.lock */,
 				13B07F871A680F5B00A75B9A /* Sources */,
 				13B07F8C1A680F5B00A75B9A /* Frameworks */,
 				13B07F8E1A680F5B00A75B9A /* Resources */,
 				00DD1BFF1BD5951E006B06BC /* Bundle React Native code and images */,
-				00EEFC60759A1932668264C0 /* [CP] Embed Pods Frameworks */,
-				E235C05ADACE081382539298 /* [CP] Copy Pods Resources */,
+				CEF2A4AE6041373C8A3B1189 /* [CP] Embed Pods Frameworks */,
+				562C868A979882BADAE8CD3B /* [CP] Copy Pods Resources */,
 			);
 			buildRules = (
 			);
@@ -159,6 +184,12 @@
 			files = (
 				81AB9BB82411601600AC10FF /* LaunchScreen.storyboard in Resources */,
 				13B07FBF1A68108700A75B9A /* Images.xcassets in Resources */,
+				40D554485924F9B566FF3EF1 /* PrivacyInfo.xcprivacy in Resources */,
+				600334AB5D1B426CB332AA47 /* SequelSans-SemiBoldHead.ttf in Resources */,
+				29897B06CB1341D3A437B3AA /* SequelSans-BookBody.ttf in Resources */,
+				CF67C80A2C0C484A8C7FFF83 /* SequelSans-MediumBody.ttf in Resources */,
+				36C3AC24E4D54BCF9A8DE60E /* SequelSans-LightBody.ttf in Resources */,
+				AC8DB9123E57484F87492124 /* SequelSans-SemiBoldBody.ttf in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -181,7 +212,24 @@
 			shellPath = /bin/sh;
 			shellScript = "set -e\n\nWITH_ENVIRONMENT=\"$REACT_NATIVE_PATH/scripts/xcode/with-environment.sh\"\nREACT_NATIVE_XCODE=\"$REACT_NATIVE_PATH/scripts/react-native-xcode.sh\"\n\n/bin/sh -c \"$WITH_ENVIRONMENT $REACT_NATIVE_XCODE\"\n";
 		};
-		00EEFC60759A1932668264C0 /* [CP] Embed Pods Frameworks */ = {
+		562C868A979882BADAE8CD3B /* [CP] Copy Pods Resources */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+				"${PODS_ROOT}/Target Support Files/Pods-ofis_screens/Pods-ofis_screens-resources-${CONFIGURATION}-input-files.xcfilelist",
+			);
+			name = "[CP] Copy Pods Resources";
+			outputFileListPaths = (
+				"${PODS_ROOT}/Target Support Files/Pods-ofis_screens/Pods-ofis_screens-resources-${CONFIGURATION}-output-files.xcfilelist",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "\"${PODS_ROOT}/Target Support Files/Pods-ofis_screens/Pods-ofis_screens-resources.sh\"\n";
+			showEnvVarsInLog = 0;
+		};
+		CEF2A4AE6041373C8A3B1189 /* [CP] Embed Pods Frameworks */ = {
 			isa = PBXShellScriptBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -198,7 +246,7 @@
 			shellScript = "\"${PODS_ROOT}/Target Support Files/Pods-ofis_screens/Pods-ofis_screens-frameworks.sh\"\n";
 			showEnvVarsInLog = 0;
 		};
-		C38B50BA6285516D6DCD4F65 /* [CP] Check Pods Manifest.lock */ = {
+		D08A85EA37A4F426F4865F79 /* [CP] Check Pods Manifest.lock */ = {
 			isa = PBXShellScriptBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -220,23 +268,6 @@
 			shellScript = "diff \"${PODS_PODFILE_DIR_PATH}/Podfile.lock\" \"${PODS_ROOT}/Manifest.lock\" > /dev/null\nif [ $? != 0 ] ; then\n    # print error to STDERR\n    echo \"error: The sandbox is not in sync with the Podfile.lock. Run 'pod install' or update your CocoaPods installation.\" >&2\n    exit 1\nfi\n# This output is used by Xcode 'outputs' to avoid re-running this script phase.\necho \"SUCCESS\" > \"${SCRIPT_OUTPUT_FILE_0}\"\n";
 			showEnvVarsInLog = 0;
 		};
-		E235C05ADACE081382539298 /* [CP] Copy Pods Resources */ = {
-			isa = PBXShellScriptBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			inputFileListPaths = (
-				"${PODS_ROOT}/Target Support Files/Pods-ofis_screens/Pods-ofis_screens-resources-${CONFIGURATION}-input-files.xcfilelist",
-			);
-			name = "[CP] Copy Pods Resources";
-			outputFileListPaths = (
-				"${PODS_ROOT}/Target Support Files/Pods-ofis_screens/Pods-ofis_screens-resources-${CONFIGURATION}-output-files.xcfilelist",
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-			shellPath = /bin/sh;
-			shellScript = "\"${PODS_ROOT}/Target Support Files/Pods-ofis_screens/Pods-ofis_screens-resources.sh\"\n";
-			showEnvVarsInLog = 0;
-		};
 /* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
@@ -253,7 +284,7 @@
 /* Begin XCBuildConfiguration section */
 		13B07F941A680F5B00A75B9A /* Debug */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = 3B4392A12AC88292D35C810B /* Pods-ofis_screens.debug.xcconfig */;
+			baseConfigurationReference = 2A7445FBDFD640157C9DED1F /* Pods-ofis_screens.debug.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_MODULES = YES;
@@ -281,7 +312,7 @@
 		};
 		13B07F951A680F5B00A75B9A /* Release */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = 5709B34CF0A7D63546082F79 /* Pods-ofis_screens.release.xcconfig */;
+			baseConfigurationReference = 37945EB27D83482696A0B2C3 /* Pods-ofis_screens.release.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_MODULES = YES;
@@ -374,7 +405,10 @@
 					"-DFOLLY_CFG_NO_COROUTINES=1",
 					"-DFOLLY_HAVE_CLOCK_GETTIME=1",
 				);
+				REACT_NATIVE_PATH = "${PODS_ROOT}/../../node_modules/react-native";
 				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) DEBUG";
+				USE_HERMES = true;
 			};
 			name = Debug;
 		};
@@ -439,7 +473,9 @@
 					"-DFOLLY_CFG_NO_COROUTINES=1",
 					"-DFOLLY_HAVE_CLOCK_GETTIME=1",
 				);
+				REACT_NATIVE_PATH = "${PODS_ROOT}/../../node_modules/react-native";
 				SDKROOT = iphoneos;
+				USE_HERMES = true;
 				VALIDATE_PRODUCT = YES;
 			};
 			name = Release;

@@ -1,0 +1,25 @@
+{
+  "migIndex": 1,
+  "data": [
+    {
+      "path": "src/assets/fonts/SequelSans-SemiBoldHead.ttf",
+      "sha1": "0a0c51ba396ecdb19be9f47f7d942aa1eae0fb69"
+    },
+    {
+      "path": "src/assets/fonts/SequelSans-BookBody.ttf",
+      "sha1": "f92e0f2c4a9ef2945a594060bdd826f255c43198"
+    },
+    {
+      "path": "src/assets/fonts/SequelSans-MediumBody.ttf",
+      "sha1": "36f4298c7ac2dc43a26ed113e9d97e286bc3eb78"
+    },
+    {
+      "path": "src/assets/fonts/SequelSans-LightBody.ttf",
+      "sha1": "097d666ea1089c71f8a4523abb7647823515110c"
+    },
+    {
+      "path": "src/assets/fonts/SequelSans-SemiBoldBody.ttf",
+      "sha1": "588ffb175befe6277ebc7822fccb9ecc6658b55a"
+    }
+  ]
+}
