@@ -13,14 +13,25 @@ interface Props {
 
 export const OtpInput: React.FC<Props> = ({ length = 4, onComplete, onChange }) => {
   const [otp, setOtp] = useState<string[]>(Array(length).fill(''));
+  const [focusedIndex, setFocusedIndex] = useState<number | null>(null);
   const inputs = useRef<(TextInput | null)[]>([]);
 
   const handleChange = (text: string, index: number) => {
+    const digits = text.replace(/\D/g, '');
     const newOtp = [...otp];
-    newOtp[index] = text;
+
+    if (digits.length > 1) {
+      digits.slice(0, length - index).split('').forEach((digit, offset) => {
+        newOtp[index + offset] = digit;
+      });
+    } else {
+      newOtp[index] = digits;
+    }
+
     setOtp(newOtp);
     onChange?.(newOtp.join(''));
-    if (text && index < length - 1) inputs.current[index + 1]?.focus();
+    const nextIndex = Math.min(index + Math.max(digits.length, 1), length - 1);
+    if (digits && nextIndex > index) inputs.current[nextIndex]?.focus();
     if (newOtp.every(d => d !== '')) onComplete?.(newOtp.join(''));
   };
 
@@ -38,13 +49,24 @@ export const OtpInput: React.FC<Props> = ({ length = 4, onComplete, onChange }) 
       {Array(length).fill(0).map((_, index) => (
         <TextInput
           key={index}
-          ref={ref => (inputs.current[index] = ref)}
-          style={[styles.box, otp[index] ? styles.boxFilled : styles.boxEmpty]}
+          ref={ref => {
+            inputs.current[index] = ref;
+          }}
+          style={[
+            styles.box,
+            otp[index] ? styles.boxFilled : styles.boxEmpty,
+            focusedIndex === index && styles.boxFocused,
+          ]}
           keyboardType="number-pad"
-          maxLength={1}
+          maxLength={length}
           value={otp[index]}
           onChangeText={text => handleChange(text, index)}
           onKeyPress={e => handleKeyPress(e, index)}
+          onFocus={() => setFocusedIndex(index)}
+          onBlur={() => setFocusedIndex(current => current === index ? null : current)}
+          selectTextOnFocus
+          textContentType={index === 0 ? 'oneTimeCode' : 'none'}
+          autoComplete={index === 0 ? 'sms-otp' : 'off'}
           selectionColor={Colors.accent300}
           caretHidden
         />
@@ -55,14 +77,17 @@ export const OtpInput: React.FC<Props> = ({ length = 4, onComplete, onChange }) 
 
 const styles = StyleSheet.create({
   container: {
+    width: '100%',
     flexDirection: 'row',
-    justifyContent: 'center',
-    gap: 12,
+    justifyContent: 'space-between',
+    gap: 8,
   },
   box: {
-    width: 64,
-    height: 64,
-    borderRadius: BorderRadius.md,
+    flex: 1,
+    minWidth: 0,
+    maxWidth: 52,
+    height: 58,
+    borderRadius: BorderRadius.lg,
     textAlign: 'center',
     textAlignVertical: 'center',
     fontFamily: 'SequelSans-MediumBody',
@@ -73,12 +98,17 @@ const styles = StyleSheet.create({
     padding: 0,
   },
   boxEmpty: {
-    backgroundColor: Colors.secondarySurface,
-    borderWidth: 1.5,
+    backgroundColor: 'rgba(44,44,46,0.92)',
+    borderWidth: 1,
     borderColor: Colors.borderDefault,
   },
   boxFilled: {
     backgroundColor: Colors.secondarySurface,
+    borderWidth: 1.5,
+    borderColor: Colors.accent300,
+  },
+  boxFocused: {
+    backgroundColor: 'rgba(255,126,21,0.10)',
     borderWidth: 1.5,
     borderColor: Colors.accent300,
   },

@@ -1,15 +1,16 @@
 import React, { useState } from 'react';
 import {
   View, Text, StyleSheet, ImageBackground,
-  Image, TouchableOpacity, ScrollView, TextInput, Modal,
+  Image, TouchableOpacity, TextInput, Modal,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import LinearGradient from 'react-native-linear-gradient';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../../navigation/MainStackNavigator';
 import { Colors, Typography, Spacing, BorderRadius } from '../../theme';
 import { OrangeButton } from '../../components/atoms/OrangeButton';
+import { KeyboardSafeScrollView } from '../../components/molecules/KeyboardSafeScrollView';
 
 const BG    = { uri: 'https://ik.imagekit.io/p1zreiw3z/preview.jpg' };
 const LOGO  = { uri: 'https://ik.imagekit.io/p1zreiw3z/Ofis%20Square%20White%20Logo%201.png' };
@@ -98,7 +99,7 @@ export function SingleDeskScreen() {
   };
 
   return (
-    <View style={styles.root}>
+    <SafeAreaView style={styles.root} edges={['top']}>
       <ImageBackground source={BG} style={styles.bg} resizeMode="cover">
 
         <LinearGradient
@@ -118,9 +119,7 @@ export function SingleDeskScreen() {
           end={{ x: 0, y: 1 }}
           style={styles.sheet}
         >
-          <ScrollView
-            showsVerticalScrollIndicator={false}
-            keyboardShouldPersistTaps="handled"
+          <KeyboardSafeScrollView
             contentContainerStyle={[styles.inner, { paddingBottom: insets.bottom + 24 }]}
           >
             <Text style={styles.title}>Single Desk</Text>
@@ -261,7 +260,7 @@ export function SingleDeskScreen() {
               style={styles.btn}
             />
 
-          </ScrollView>
+          </KeyboardSafeScrollView>
         </LinearGradient>
 
       </ImageBackground>
@@ -350,7 +349,7 @@ export function SingleDeskScreen() {
         </TouchableOpacity>
       </Modal>
 
-    </View>
+    </SafeAreaView>
   );
 }
 

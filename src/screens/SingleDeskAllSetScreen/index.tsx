@@ -2,7 +2,7 @@ import React from 'react';
 import {
   View, Text, StyleSheet, ImageBackground, Image,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import LinearGradient from 'react-native-linear-gradient';
 import Svg, { G, Path, Defs, ClipPath, Rect } from 'react-native-svg';
 import { useNavigation } from '@react-navigation/native';
@@ -35,7 +35,7 @@ export function SingleDeskAllSetScreen() {
   const insets     = useSafeAreaInsets();
 
   return (
-    <View style={styles.root}>
+    <SafeAreaView style={styles.root} edges={['top']}>
       <ImageBackground source={BG} style={styles.bg} resizeMode="cover">
 
         <LinearGradient
@@ -84,7 +84,7 @@ export function SingleDeskAllSetScreen() {
         </LinearGradient>
 
       </ImageBackground>
-    </View>
+    </SafeAreaView>
   );
 }
 

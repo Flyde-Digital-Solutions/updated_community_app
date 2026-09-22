@@ -1,35 +1,47 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   View, Text, StyleSheet, ImageBackground,
   Image, KeyboardAvoidingView, Platform, TouchableOpacity,
+  Alert, ScrollView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import LinearGradient from 'react-native-linear-gradient';
-import { useNavigation } from '@react-navigation/native';
+import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../../navigation/MainStackNavigator';
 import { Colors, Typography, Spacing, BorderRadius } from '../../theme';
 import { OrangeButton } from '../../components/atoms/OrangeButton';
 import { InputField } from '../../components/atoms/InputField';
+import { useApp } from '../../context/AppContext';
+import { useDayPassCatalog } from '../../hooks/useDayPassCatalog';
 
 const BG        = { uri: 'https://ik.imagekit.io/p1zreiw3z/preview.jpg' };
 const LOGO      = { uri: 'https://ik.imagekit.io/p1zreiw3z/Ofis%20Square%20White%20Logo%201.png' };
 const ARROW_URI = 'https://ik.imagekit.io/p1zreiw3z/Ofis%20Square/Icon.png';
-const CITIES    = ['Noida', 'Gurugram', 'Delhi', 'Mumbai', 'Bengaluru', 'Hyderabad'];
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
 export function EnterDetailsScreen() {
   const navigation = useNavigation<Nav>();
+  const route = useRoute<RouteProp<RootStackParamList, 'EnterDetailsScreen'>>();
+  const { register } = useApp();
+  const { buildings, loading: citiesLoading, error: citiesError } = useDayPassCatalog();
+  const cities = useMemo(() => Array.from(new Set(buildings.map(building => building.city).filter(Boolean))), [buildings]);
 
   const [fullName,   setFullName]   = useState('');
   const [email,      setEmail]      = useState('');
-  const [city,       setCity]       = useState('Noida');
+  const [phone,      setPhone]      = useState(route.params?.phone || '');
+  const [password,   setPassword]   = useState('');
+  const [city,       setCity]       = useState('');
   const [company,    setCompany]    = useState('');
   const [terms,      setTerms]      = useState(false);
   const [showCities, setShowCities] = useState(false);
   const [emailError, setEmailError] = useState('');
   const [loading,    setLoading]    = useState(false);
+
+  useEffect(() => {
+    if (!city && cities.length) setCity(cities[0]);
+  }, [cities, city]);
 
   const validateEmail = (val: string) =>
     /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val);
@@ -41,13 +53,31 @@ export function EnterDetailsScreen() {
     }
     setEmailError('');
     setLoading(true);
-    await new Promise(r => setTimeout(r, 1000));
-    setLoading(false);
-    navigation.navigate('WhatToBookScreen');
+    try {
+      const result = await register({
+        name: fullName.trim(),
+        email: email.trim().toLowerCase(),
+        phone,
+        password,
+        company: company.trim() || undefined,
+        city,
+      });
+      if (result.offline) {
+        Alert.alert('Registration unavailable', 'The production service is currently unavailable, so no account was created. Please try again when the service is restored.');
+        return;
+      }
+      Alert.alert('Account created', 'You can now sign in with your mobile number.', [
+        { text: 'Continue', onPress: () => navigation.navigate('LoginScreen') },
+      ]);
+    } catch (error) {
+      Alert.alert('Registration failed', error instanceof Error ? error.message : 'Please try again.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
-    <SafeAreaView style={styles.safe} edges={['bottom']}>
+    <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
       <ImageBackground source={BG} style={styles.bg} resizeMode="cover">
 
         {/* Gradient overlay */}
@@ -58,26 +88,30 @@ export function EnterDetailsScreen() {
           style={StyleSheet.absoluteFill}
         />
 
-        {/* Logo */}
-        <View style={styles.logoContainer}>
-          <Image source={LOGO} style={styles.logo} resizeMode="contain" />
-        </View>
-
         <KeyboardAvoidingView
           style={styles.flex}
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         >
-          <View style={styles.flex} />
-
-          {/* Bottom sheet */}
-          <LinearGradient
-            colors={['rgba(28,28,30,0.80)', 'rgba(21,21,23,0.80)']}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 0, y: 1 }}
-            style={styles.sheet}
+          <ScrollView
+            style={styles.scroll}
+            contentContainerStyle={styles.scrollContent}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
           >
-            {/* Form area */}
-            <View style={styles.formArea}>
+            {/* Keep branding in the document flow so it can never cover a field. */}
+            <View style={styles.logoContainer}>
+              <Image source={LOGO} style={styles.logo} resizeMode="contain" />
+            </View>
+
+            {/* Bottom sheet */}
+            <LinearGradient
+              colors={['rgba(28,28,30,0.80)', 'rgba(21,21,23,0.80)']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 0, y: 1 }}
+              style={styles.sheet}
+            >
+              {/* Form area */}
+              <View style={styles.formArea}>
 
               <Text style={styles.title}>Enter your Details</Text>
 
@@ -106,6 +140,25 @@ export function EnterDetailsScreen() {
                 error={emailError}
               />
 
+              <Text style={styles.fieldLabel}>Mobile Number</Text>
+              <InputField
+                placeholder="10-digit mobile number"
+                value={phone}
+                onChangeText={value => setPhone(value.replace(/\D/g, '').slice(0, 10))}
+                keyboardType="phone-pad"
+                maxLength={10}
+                containerStyle={styles.field}
+              />
+
+              <Text style={styles.fieldLabel}>Password</Text>
+              <InputField
+                placeholder="Minimum 6 characters"
+                value={password}
+                onChangeText={setPassword}
+                secureTextEntry
+                containerStyle={styles.field}
+              />
+
               {/* City */}
               <Text style={styles.fieldLabel}>City</Text>
               <View style={styles.dropdownWrapper}>
@@ -114,7 +167,7 @@ export function EnterDetailsScreen() {
                   style={styles.dropdown}
                   activeOpacity={0.7}
                 >
-                  <Text style={styles.dropdownValue}>{city}</Text>
+                  <Text style={styles.dropdownValue}>{city || (citiesLoading ? 'Loading cities…' : 'Select city')}</Text>
                   <View style={[styles.arrowContainer, showCities && styles.arrowContainerUp]}>
                     <Image
                       source={{ uri: ARROW_URI }}
@@ -126,7 +179,7 @@ export function EnterDetailsScreen() {
 
                 {showCities && (
                   <View style={styles.cityList}>
-                    {CITIES.map(c => (
+                    {cities.map(c => (
                       <TouchableOpacity
                         key={c}
                         style={[styles.cityItem, c === city && styles.cityItemActive]}
@@ -138,6 +191,7 @@ export function EnterDetailsScreen() {
                         </Text>
                       </TouchableOpacity>
                     ))}
+                    {!citiesLoading && cities.length === 0 ? <Text style={styles.cityMessage}>{citiesError || 'No active cities are available.'}</Text> : null}
                   </View>
                 )}
               </View>
@@ -153,10 +207,10 @@ export function EnterDetailsScreen() {
                 containerStyle={styles.field}
               />
 
-            </View>
+              </View>
 
-            {/* Fixed bottom */}
-            <View style={styles.fixedBottom}>
+              {/* Form footer */}
+              <View style={styles.fixedBottom}>
               <TouchableOpacity
                 onPress={() => setTerms(p => !p)}
                 activeOpacity={0.7}
@@ -177,11 +231,11 @@ export function EnterDetailsScreen() {
                 label="Sign Up"
                 onPress={handleSignUp}
                 loading={loading}
-                disabled={!fullName || !email || !terms}
+                disabled={!fullName || !email || phone.length !== 10 || password.length < 6 || !city || !terms}
               />
-            </View>
-
-          </LinearGradient>
+              </View>
+            </LinearGradient>
+          </ScrollView>
         </KeyboardAvoidingView>
 
       </ImageBackground>
@@ -193,21 +247,24 @@ const styles = StyleSheet.create({
   safe:          { flex: 1, backgroundColor: Colors.black },
   bg:            { flex: 1, backgroundColor: Colors.black },
   flex:          { flex: 1 },
-  logoContainer: {
-    position: 'absolute',
-    top: 100,
-    left: 0,
-    right: 0,
-    alignItems: 'center',
-    zIndex: 10,
+  scroll:        { flex: 1 },
+  scrollContent: {
+    flexGrow: 1,
+    paddingTop: 42,
   },
-  logo: { width: 180, height: 122 },
+  logoContainer: {
+    height: 104,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: Spacing.sm,
+  },
+  logo: { width: 160, height: 92 },
 
   sheet: {
     width: '100%',
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
-    paddingTop: Spacing.xxxl,
+    paddingTop: Spacing.xl,
     paddingBottom: 0,
   },
 
@@ -297,6 +354,7 @@ const styles = StyleSheet.create({
   cityItemActive: { backgroundColor: 'rgba(255,126,21,0.1)' },
   cityText:       { ...Typography.primaryBody, color: Colors.textPrimary },
   cityTextActive: { color: Colors.accent300 },
+  cityMessage: { ...Typography.caption, color: Colors.textSecondary, padding: Spacing.md, textAlign: 'center' },
 
   // Fixed bottom
   fixedBottom: {

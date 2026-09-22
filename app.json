@@ -1,4 +1,9 @@
 {
   "name": "ofis_screens",
-  "displayName": "ofis_screens"
+  "displayName": "OSPLCommunity",
+  "extra": {
+    "eas": {
+      "projectId": "e52ad784-34e5-4737-85ff-a633b24dd409"
+    }
+  }
 }

@@ -1,37 +1,47 @@
 import React, { useState } from 'react';
 import {
   View, Text, StyleSheet, ImageBackground,
-  Image, KeyboardAvoidingView, Platform, Dimensions,
+  Image, Alert,
 } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
-import { useNavigation } from '@react-navigation/native';
-import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { RouteProp, useRoute } from '@react-navigation/native';
 import { RootStackParamList } from '../../navigation/MainStackNavigator';
-import { Colors, Typography, Spacing, BorderRadius } from '../../theme';
+import { Colors, Typography, Spacing } from '../../theme';
 import { OtpInput } from '../../components/atoms/OtpInput';
 import { OrangeButton } from '../../components/atoms/OrangeButton';
 import { AppTextButton } from '../../components/atoms/Buttons';
+import { useApp } from '../../context/AppContext';
+import { KeyboardSafeScrollView } from '../../components/molecules/KeyboardSafeScrollView';
 
 const BG = { uri: 'https://ik.imagekit.io/p1zreiw3z/preview.jpg' };
 const LOGO = { uri: 'https://ik.imagekit.io/p1zreiw3z/Ofis%20Square%20White%20Logo%201.png' };
 
-type Nav = NativeStackNavigationProp<RootStackParamList>;
-
 export function OtpScreen() {
-  const navigation = useNavigation<Nav>();
+  const route = useRoute<RouteProp<RootStackParamList, 'OtpScreen'>>();
+  const { login, sendOtp } = useApp();
   const [otp, setOtp] = useState('');
   const [loading, setLoading] = useState(false);
 
   const handleVerify = async () => {
-    if (otp.length < 4) return;
+    const code = otp.trim();
+    if (code.length !== 6) {
+      Alert.alert('Enter the complete code', 'Please enter all 6 digits before continuing.');
+      return;
+    }
     setLoading(true);
-    await new Promise(r => setTimeout(r, 1000));
-    setLoading(false);
-    navigation.navigate('EnterDetailsScreen');
+    try {
+      await login(route.params.phone, code);
+    } catch (error) {
+      Alert.alert('Verification failed', error instanceof Error ? error.message : 'Please check your OTP.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
-    <ImageBackground source={BG} style={styles.bg} resizeMode="cover">
+    <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
+      <ImageBackground source={BG} style={styles.bg} resizeMode="cover">
 
       {/* Gradient overlay: transparent top → black bottom */}
       <LinearGradient
@@ -41,69 +51,68 @@ export function OtpScreen() {
         style={StyleSheet.absoluteFill}
       />
 
-      {/* Logo */}
-      <View style={styles.logoContainer}>
-        <Image source={LOGO} style={styles.logo} resizeMode="contain" />
-      </View>
-
       {/* Push sheet to bottom */}
-      <KeyboardAvoidingView
-        style={styles.flex}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      >
-        <View style={styles.flex} />
+      <KeyboardSafeScrollView contentContainerStyle={styles.scrollContent}>
+        <View style={styles.brand}>
+          <Image source={LOGO} style={styles.logo} resizeMode="contain" />
+        </View>
 
         {/* Bottom sheet */}
         <View style={styles.sheet}>
           <Text style={styles.title}>Verify your contact</Text>
           <Text style={styles.subtitle}>
-            We just sent you a 4-digit code to{'\n'}+91 XXXXXXXX
+            {`We sent a 6-digit code to\n+91 ${route.params.phone}`}
           </Text>
 
           <View style={styles.otpRow}>
             <OtpInput
-              length={4}
+              length={6}
               onChange={setOtp}
-              onComplete={handleVerify}
             />
           </View>
 
           <OrangeButton
             label="Verify Contact no."
-            onPress={handleVerify}
+            onPress={() => handleVerify()}
             loading={loading}
-            disabled={otp.length < 4}
             style={styles.btn}
           />
 
           <AppTextButton
             label="Resend OTP"
-            onPress={() => setOtp('')}
+            onPress={async () => {
+              setOtp('');
+              try {
+                await sendOtp(route.params.phone);
+                Alert.alert('Code sent', 'A new verification code has been requested.');
+              } catch (error) {
+                Alert.alert('Could not resend', error instanceof Error ? error.message : 'Please try again.');
+              }
+            }}
             style={styles.resend}
           />
         </View>
-      </KeyboardAvoidingView>
+      </KeyboardSafeScrollView>
 
-    </ImageBackground>
+      </ImageBackground>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
+  safe: {
+    flex: 1,
+    backgroundColor: Colors.black,
+  },
   bg: {
     flex: 1,
     backgroundColor: Colors.black,
   },
-  flex: {
-    flex: 1,
+  scrollContent: {
+    flexGrow: 1,
+    justifyContent: 'flex-end',
   },
-  logoContainer: {
-    position: 'absolute',
-    top: 100,
-    left: 0,
-    right: 0,
-    alignItems: 'center',
-    zIndex: 10,
-  },
+  brand: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   logo: {
     width: 180,
     height: 122,

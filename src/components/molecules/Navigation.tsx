@@ -1,6 +1,6 @@
 import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Image, ViewStyle } from 'react-native';
-import { Colors, Typography, Spacing, BorderRadius } from '../../theme';
+import { View, Text, TouchableOpacity, StyleSheet, ViewStyle } from 'react-native';
+import { Colors, Typography, Spacing } from '../../theme';
 
 // ── TopBar ─────────────────────────────────────────────────────────────────────
 interface TopBarProps {

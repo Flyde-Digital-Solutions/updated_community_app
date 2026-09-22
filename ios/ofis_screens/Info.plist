@@ -7,7 +7,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleDisplayName</key>
-	<string>ofis_screens</string>
+	<string>OSPLCommunity</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -26,6 +26,12 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>LSApplicationQueriesSchemes</key>
+	<array>
+		<string>tel</string>
+		<string>mailto</string>
+		<string>whatsapp</string>
+	</array>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoads</key>
@@ -33,6 +39,8 @@
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
+	<key>NSCameraUsageDescription</key>
+	<string>Ofis uses the camera to scan visitor QR codes.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string/>
 	<key>RCTNewArchEnabled</key>
@@ -58,6 +66,12 @@
 		<string>SequelSans-MediumBody.ttf</string>
 		<string>SequelSans-LightBody.ttf</string>
 		<string>SequelSans-SemiBoldBody.ttf</string>
+		<string>MaterialCommunityIcons.ttf</string>
+		<string>MaterialIcons.ttf</string>
+		<string>Ionicons.ttf</string>
+		<string>FontAwesome5_Brands.ttf</string>
+		<string>FontAwesome5_Regular.ttf</string>
+		<string>FontAwesome5_Solid.ttf</string>
 	</array>
 </dict>
 </plist>

@@ -11,7 +11,7 @@ interface Props {
 }
 
 export const BottomSheet: React.FC<Props> = ({
-  children, style, scrollable = false, avoidKeyboard = false, paddingBottom = 40,
+  children, style, scrollable = false, avoidKeyboard = true, paddingBottom = 40,
 }) => {
   const inner = scrollable ? (
     <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom }}>
@@ -34,9 +34,12 @@ export const BottomSheet: React.FC<Props> = ({
 };
 
 export const BottomSheetModal: React.FC<{ children: React.ReactNode; style?: ViewStyle }> = ({ children, style }) => (
-  <View style={styles.modalOverlay}>
+  <KeyboardAvoidingView
+    style={styles.modalOverlay}
+    behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+  >
     <View style={[styles.modalSheet, style]}>{children}</View>
-  </View>
+  </KeyboardAvoidingView>
 );
 
 const styles = StyleSheet.create({

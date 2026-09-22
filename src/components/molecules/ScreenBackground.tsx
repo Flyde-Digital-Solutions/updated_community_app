@@ -1,6 +1,5 @@
 import React from 'react';
 import { View, ImageBackground, Image, StyleSheet, StatusBar } from 'react-native';
-import { Colors } from '../../theme';
 
 const LOGO_URI = 'https://ik.imagekit.io/p1zreiw3z/Ofis%20Square%20White%20Logo%201.png';
 
@@ -27,7 +26,7 @@ export const ScreenBackground: React.FC<Props> = ({
       style={styles.bg}
       resizeMode="cover"
     >
-      <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
+      <StatusBar barStyle="light-content" translucent={false} backgroundColor="#0F0F10" />
       <View style={[styles.overlay, { backgroundColor: `rgba(0,0,0,${overlayOpacity})` }]} />
       {showLogo && (
         <View style={styles.logoContainer}>

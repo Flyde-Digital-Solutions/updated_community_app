@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View, Text, StyleSheet, ImageBackground,
   Image, TouchableOpacity, ScrollView,
@@ -10,15 +10,15 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../../navigation/MainStackNavigator';
 import { Colors, Typography, Spacing, BorderRadius } from '../../theme';
 import { OrangeButton } from '../../components/atoms/OrangeButton';
+import { useApp } from '../../context/AppContext';
+import { useDayPassCatalog } from '../../hooks/useDayPassCatalog';
 
 const BG    = { uri: 'https://ik.imagekit.io/p1zreiw3z/preview.jpg' };
 const LOGO  = { uri: 'https://ik.imagekit.io/p1zreiw3z/Ofis%20Square%20White%20Logo%201.png' };
 const ARROW = { uri: 'https://ik.imagekit.io/p1zreiw3z/Ofis%20Square/Icon.png' };
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
-type PassType = '1day' | '8day' | '12day';
 
-const LOCATIONS   = ['Sohna Road', 'Mehrauli', 'Noida Sector 62', 'Gurugram'];
 const MONTHS      = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 const DAYS_OF_WEEK = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
 
@@ -49,11 +49,13 @@ function getCalendarDays(year: number, month: number): CalCell[] {
 
 export function SelectPassScreen() {
   const navigation = useNavigation<Nav>();
+  const { user } = useApp();
+  const { buildings, bundles, loading, error } = useDayPassCatalog();
   const today      = new Date();
 
   const [quantity,      setQuantity]      = useState(1);
-  const [selectedPass,  setSelectedPass]  = useState<PassType>('1day');
-  const [location,      setLocation]      = useState('Sohna Road');
+  const [selectedPass,  setSelectedPass]  = useState('single');
+  const [buildingId,    setBuildingId]    = useState('');
   const [showLocations, setShowLocations] = useState(false);
   const [showCalendar,  setShowCalendar]  = useState(false);
   const [selectedDate,  setSelectedDate]  = useState<Date | null>(null);
@@ -61,6 +63,22 @@ export function SelectPassScreen() {
   const [calYear,       setCalYear]       = useState(today.getFullYear());
 
   const calDays = getCalendarDays(calYear, calMonth);
+  const selectedBuilding = buildings.find(building => building.id === buildingId);
+  const availableBundles = bundles.filter(bundle => !bundle.buildingId || bundle.buildingId === buildingId);
+  const background = selectedBuilding?.coverImage ? { uri: selectedBuilding.coverImage } : BG;
+
+  useEffect(() => {
+    if (buildingId || !buildings.length) return;
+    setBuildingId(buildings.find(building => building.id === user?.buildingId)?.id || buildings[0].id);
+  }, [buildingId, buildings, user?.buildingId]);
+
+  useEffect(() => {
+    if (selectedPass !== 'single' && !availableBundles.some(bundle => bundle.id === selectedPass)) setSelectedPass('single');
+  }, [availableBundles, selectedPass]);
+
+  const currency = (amount: number) => amount > 0
+    ? `₹${Math.round(amount).toLocaleString('en-IN')}`
+    : 'Price unavailable';
 
   const dateLabel = () => {
     if (!selectedDate) return 'Today';
@@ -101,8 +119,8 @@ export function SelectPassScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.safe} edges={['bottom']}>
-      <ImageBackground source={BG} style={styles.bg} resizeMode="cover">
+    <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
+      <ImageBackground source={background} style={styles.bg} resizeMode="cover">
 
         <LinearGradient
           colors={['rgba(0,0,0,0)', '#000000']}
@@ -137,7 +155,7 @@ export function SelectPassScreen() {
                 activeOpacity={0.7}
               >
                 <View style={styles.locationDot} />
-                <Text style={styles.locationText}>{location}</Text>
+                <Text style={styles.locationText}>{selectedBuilding?.name || (loading ? 'Loading locations…' : 'Select a location')}</Text>
                 <Image
                   source={ARROW}
                   style={[styles.arrowIcon, showLocations && styles.arrowUp]}
@@ -146,18 +164,19 @@ export function SelectPassScreen() {
               </TouchableOpacity>
               {showLocations && (
                 <View style={styles.locationList}>
-                  {LOCATIONS.map(loc => (
+                  {buildings.map(building => (
                     <TouchableOpacity
-                      key={loc}
-                      style={[styles.locationItem, loc === location && styles.locationItemActive]}
-                      onPress={() => { setLocation(loc); setShowLocations(false); }}
+                      key={building.id}
+                      style={[styles.locationItem, building.id === buildingId && styles.locationItemActive]}
+                      onPress={() => { setBuildingId(building.id); setShowLocations(false); }}
                       activeOpacity={0.7}
                     >
-                      <Text style={[styles.locationItemText, loc === location && styles.locationItemTextActive]}>
-                        {loc}
+                      <Text style={[styles.locationItemText, building.id === buildingId && styles.locationItemTextActive]}>
+                        {building.name}{building.city ? ` · ${building.city}` : ''}
                       </Text>
                     </TouchableOpacity>
                   ))}
+                  {!loading && buildings.length === 0 ? <Text style={styles.catalogMessage}>{error || 'No active locations are available.'}</Text> : null}
                 </View>
               )}
             </View>
@@ -187,19 +206,19 @@ export function SelectPassScreen() {
 
             {/* 1 Day Pass */}
             <TouchableOpacity
-              onPress={() => setSelectedPass('1day')}
+              onPress={() => setSelectedPass('single')}
               activeOpacity={0.7}
-              style={[styles.passCard, selectedPass === '1day' && styles.passCardSelected]}
+              style={[styles.passCard, selectedPass === 'single' && styles.passCardSelected]}
             >
               <View style={styles.passCardLeft}>
                 <Text style={styles.passTitle}>1 Day Pass</Text>
                 <Text style={styles.passSub}>Valid for one visit</Text>
               </View>
-              <Text style={styles.passPrice}>₹799</Text>
+              <Text style={styles.passPrice}>{currency((selectedBuilding?.price || 0) * quantity)}</Text>
             </TouchableOpacity>
 
             {/* Date picker — only when 1day selected */}
-            {selectedPass === '1day' && (
+            {selectedPass === 'single' && (
               <View style={styles.datePicker}>
                 <TouchableOpacity
                   onPress={() => setShowCalendar(p => !p)}
@@ -283,44 +302,36 @@ export function SelectPassScreen() {
             {/* Bundles header */}
             <Text style={styles.bundleHeader}>Save more with bundles</Text>
 
-            {/* 8 Day Pass */}
-            <TouchableOpacity
-              onPress={() => setSelectedPass('8day')}
-              activeOpacity={0.7}
-              style={[styles.bundleCard, selectedPass === '8day' && styles.bundleCardSelected]}
-            >
-              <View style={styles.bundleLeft}>
-                <Text style={styles.bundleTitle}>8 Day Passes</Text>
-                <Text style={styles.bundleSub}>Use anytime. Select date & time later.</Text>
-              </View>
-              <View style={styles.bundleRight}>
-                <Text style={styles.bundlePrice}>₹5,100</Text>
-                <Text style={styles.bundleSave}>Save 20%</Text>
-              </View>
-            </TouchableOpacity>
-
-            {/* 12 Day Pass */}
-            <TouchableOpacity
-              onPress={() => setSelectedPass('12day')}
-              activeOpacity={0.7}
-              style={[styles.bundleCard, selectedPass === '12day' && styles.bundleCardSelected]}
-            >
-              <View style={styles.bundleLeft}>
-                <Text style={styles.bundleTitle}>12 Day Passes</Text>
-                <Text style={styles.bundleSub}>Use anytime. Select date & time later.</Text>
-              </View>
-              <View style={styles.bundleRight}>
-                <Text style={styles.bundlePrice}>₹7,199</Text>
-                <Text style={styles.bundleSave}>Save 25%</Text>
-              </View>
-            </TouchableOpacity>
+            {availableBundles.map(bundle => {
+              const total = (selectedBuilding?.price || 0) * bundle.passCount * (1 - bundle.discountPercent / 100);
+              return (
+                <TouchableOpacity
+                  key={bundle.id}
+                  onPress={() => setSelectedPass(bundle.id)}
+                  activeOpacity={0.7}
+                  style={[styles.bundleCard, selectedPass === bundle.id && styles.bundleCardSelected]}
+                >
+                  <View style={styles.bundleLeft}>
+                    <Text style={styles.bundleTitle}>{bundle.name}</Text>
+                    <Text style={styles.bundleSub}>{bundle.description || 'Use anytime. Select dates later.'}</Text>
+                  </View>
+                  <View style={styles.bundleRight}>
+                    <Text style={styles.bundlePrice}>{currency(total)}</Text>
+                    <Text style={styles.bundleSave}>Save {bundle.discountPercent}%</Text>
+                  </View>
+                </TouchableOpacity>
+              );
+            })}
+            {!loading && availableBundles.length === 0 ? <Text style={styles.catalogMessage}>No bundles are currently available for this location.</Text> : null}
 
           </ScrollView>
 
           {/* Fixed bottom */}
           <View style={styles.fixedBottom}>
             <OrangeButton
-              label={selectedPass === '1day' ? 'Proceed to Pay' : 'Buy Bundle'}
+              label={selectedPass === 'single' ? 'Proceed to Pay' : 'Buy Bundle'}
+              loading={loading}
+              disabled={!selectedBuilding || selectedBuilding.price <= 0}
               onPress={() => navigation.navigate('AllSetOnDemandScreen')}
             />
           </View>
@@ -383,6 +394,7 @@ const styles = StyleSheet.create({
   locationItemActive:     { backgroundColor: 'rgba(255,126,21,0.1)' },
   locationItemText:       { ...Typography.primaryBody, color: Colors.textPrimary },
   locationItemTextActive: { color: Colors.accent300 },
+  catalogMessage: { ...Typography.caption, color: Colors.textSecondary, padding: Spacing.md, textAlign: 'center' },
 
   // Pass header
   passHeaderRow: {

@@ -1,6 +1,6 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Image, ViewStyle } from 'react-native';
-import { Colors, Typography, Spacing, BorderRadius, Shadows } from '../../theme';
+import { Colors, Typography, Spacing, BorderRadius } from '../../theme';
 
 // ── PassCard ───────────────────────────────────────────────────────────────────
 export const PassCard: React.FC<{

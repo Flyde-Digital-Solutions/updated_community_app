@@ -3,7 +3,7 @@ import {
   View, Text, StyleSheet, ImageBackground,
   Image, TouchableOpacity, FlatList, Vibration,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import LinearGradient from 'react-native-linear-gradient';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -22,7 +22,11 @@ const BG   = { uri: 'https://ik.imagekit.io/p1zreiw3z/preview.jpg' };
 const LOGO = { uri: 'https://ik.imagekit.io/p1zreiw3z/Ofis%20Square%20White%20Logo%201.png' };
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
-type BookingOption = PlanOption & { route: keyof RootStackParamList };
+type BookingRoute =
+  | 'PrivateCabinDetailsScreen'
+  | 'SelectPassScreen'
+  | 'SingleDeskScreen';
+type BookingOption = PlanOption & { route: BookingRoute };
 
 const OPTIONS: BookingOption[] = [
   {
@@ -76,7 +80,7 @@ export function WhatToBookScreen() {
   };
 
   return (
-    <View style={styles.root}>
+    <SafeAreaView style={styles.root} edges={['top']}>
       <ImageBackground source={BG} style={styles.bg} resizeMode="cover">
 
         <LinearGradient
@@ -156,7 +160,7 @@ export function WhatToBookScreen() {
         </View>
 
       </ImageBackground>
-    </View>
+    </SafeAreaView>
   );
 }
 
