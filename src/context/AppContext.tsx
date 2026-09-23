@@ -153,6 +153,7 @@ type EventImages = {
   coverImageFile?: FileAttachment;
   additionalImageFile?: FileAttachment;
   speakerImageFiles?: FileAttachment[];
+  speakerImageIndexes?: number[];
 };
 type NewEvent = Omit<EventRecord, 'id' | 'rsvpCount' | 'status' | 'syncState'> &
   EventImages;
@@ -2649,6 +2650,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     speakerImageFiles?.forEach(file =>
       appendMultipartFile(form, 'speakerImages', file),
     );
+    if (fields.speakerImageIndexes?.length) {
+      form.append('speakerImageIndexes', JSON.stringify(fields.speakerImageIndexes));
+    }
     const response = await apiClient.post<Record<string, unknown>>(
       Routes.community.events,
       form,
@@ -2741,6 +2745,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     speakerImageFiles?.forEach(file =>
       appendMultipartFile(form, 'speakerImages', file),
     );
+    if (fields.speakerImageIndexes?.length) {
+      form.append('speakerImageIndexes', JSON.stringify(fields.speakerImageIndexes));
+    }
     const response = await apiClient.put<Record<string, unknown>>(
       Routes.event(id),
       form,

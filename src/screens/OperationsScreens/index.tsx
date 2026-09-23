@@ -633,6 +633,10 @@ export function EventsScreen() {
       speakerImageFiles: eventSpeakers
         .map(speaker => speaker.imageFile)
         .filter((file): file is FileAttachment => Boolean(file)),
+      speakerImageIndexes: eventSpeakers.reduce<number[]>((indexes, speaker, index) => {
+        if (speaker.imageFile) indexes.push(index);
+        return indexes;
+      }, []),
       coverImage: coverImage.trim(),
       additionalImage: additionalImage.trim(),
       coverImageFile: coverImageFile || undefined,
