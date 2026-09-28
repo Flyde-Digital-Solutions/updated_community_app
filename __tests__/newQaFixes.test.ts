@@ -5,7 +5,7 @@ import { downloadAuthenticatedFile } from '../src/utils/downloadFile';
 import ReactNativeBlobUtil from 'react-native-blob-util';
 import { selectedRoomAvailability } from '../src/utils/roomAvailability';
 import { meetingRoomCreditAmount, meetingRoomPayableAmount } from '../src/utils/meetingRoomPrice';
-import { canManageIssuedRfidCard, isRfidCardAssigned, isRfidCardAvailableForAssignment, mergeImportedRfidCards } from '../src/utils/rfidCard';
+import { canManageIssuedRfidCard, canSubmitAccessCardIssue, isRfidCardAssigned, isRfidCardAvailableForAssignment, mergeImportedRfidCards } from '../src/utils/rfidCard';
 import { setApiSession } from '../src/services/apiClient';
 import { Platform } from 'react-native';
 
@@ -280,6 +280,13 @@ describe('new QA fixes', () => {
     expect(
       isRfidCardAvailableForAssignment(card('Issued', 'Assigned Client')),
     ).toBe(false);
+  });
+
+  it('allows default building access when no access areas are configured', () => {
+    expect(canSubmitAccessCardIssue('card-1', [], 0)).toBe(true);
+    expect(canSubmitAccessCardIssue('card-1', [], 2)).toBe(false);
+    expect(canSubmitAccessCardIssue('card-1', ['Reception'], 2)).toBe(true);
+    expect(canSubmitAccessCardIssue('', [], 0)).toBe(false);
   });
 
   it('adds refreshed RFID imports without removing cards already in the list', () => {

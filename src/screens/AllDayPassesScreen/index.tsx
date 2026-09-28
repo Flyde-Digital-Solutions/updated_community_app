@@ -11,7 +11,7 @@ import { Colors, Typography, Spacing, BorderRadius } from '../../theme';
 import { RootStackParamList } from '../../navigation/MainStackNavigator';
 import { useApp } from '../../context/AppContext';
 import { canPayDayPass, dayPassDisplayName, normalizeDayPassStatus } from '../../utils/dayPass';
-import { isRfidCardAvailableForAssignment } from '../../utils/rfidCard';
+import { canSubmitAccessCardIssue, isRfidCardAvailableForAssignment } from '../../utils/rfidCard';
 import { openExternalLink } from '../../utils/openExternalLink';
 import { apiClient } from '../../services/apiClient';
 import { Routes } from '../../services/routes';
@@ -93,13 +93,19 @@ function AccessCardModal({ visible, memberName, onClose, onIssue, usedCards, ava
     !usedCards.includes(card.value) && card.label.toLowerCase().includes(cardSearch.toLowerCase())
   );
   const selectedCardLabel = availableCards.find(card => card.value === selectedCard)?.label;
+  const hasAreaOptions = accessAreas.length > 0;
+  const canIssue = canSubmitAccessCardIssue(
+    selectedCard,
+    selectedAreas,
+    accessAreas.length,
+  );
 
   const toggleArea = (area: string) => {
     setSelectedAreas(prev => prev.includes(area) ? prev.filter(a => a !== area) : [...prev, area]);
   };
 
   const handleIssue = () => {
-    if (!selectedCard || selectedAreas.length === 0) return;
+    if (!canIssue) return;
     onIssue(selectedCard, selectedAreas);
     setSelectedCard(''); setCardSearch(''); setSelectedAreas([]);
   };
@@ -160,29 +166,45 @@ function AccessCardModal({ visible, memberName, onClose, onIssue, usedCards, ava
             </View>
           )}
 
-          <Text style={[modalStyles.label, { marginTop: Spacing.lg }]}>Access Areas *</Text>
-          <View style={modalStyles.areasGrid}>
-            {accessAreas.map(area => {
-              const isSelected = selectedAreas.includes(area);
-              return (
-                <TouchableOpacity
-                  key={area}
-                  onPress={() => toggleArea(area)}
-                  style={[modalStyles.areaChip, isSelected && modalStyles.areaChipActive]}
-                  activeOpacity={0.7}
-                >
-                  <Icon name={isSelected ? 'checkbox-marked' : 'checkbox-blank-outline'} size={16} color={isSelected ? Colors.accent300 : Colors.textMuted} />
-                  <Text style={[modalStyles.areaChipText, isSelected && { color: Colors.accent300 }]}>{area}</Text>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
+          <Text style={[modalStyles.label, { marginTop: Spacing.lg }]}>Access Areas{hasAreaOptions ? ' *' : ''}</Text>
+          {hasAreaOptions ? (
+            <ScrollView
+              style={modalStyles.areasScroll}
+              contentContainerStyle={modalStyles.areasGrid}
+              nestedScrollEnabled
+              showsVerticalScrollIndicator
+            >
+              {accessAreas.map(area => {
+                const isSelected = selectedAreas.includes(area);
+                return (
+                  <TouchableOpacity
+                    key={area}
+                    onPress={() => toggleArea(area)}
+                    style={[modalStyles.areaChip, isSelected && modalStyles.areaChipActive]}
+                    activeOpacity={0.7}
+                  >
+                    <Icon name={isSelected ? 'checkbox-marked' : 'checkbox-blank-outline'} size={16} color={isSelected ? Colors.accent300 : Colors.textMuted} />
+                    <Text style={[modalStyles.areaChipText, isSelected && { color: Colors.accent300 }]}>{area}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          ) : (
+            <View style={modalStyles.noAreasBox}>
+              <Icon name="information-outline" size={18} color={Colors.textSecondary} />
+              <Text style={modalStyles.noAreasText}>
+                No access areas are configured for this building. The card will use default building access.
+              </Text>
+            </View>
+          )}
 
           <TouchableOpacity
-            onPress={() => !selectedCard || selectedAreas.length === 0
-              ? Alert.alert('Mandatory fields missing', 'Select an access card and at least one access area.')
+            onPress={() => !canIssue
+              ? Alert.alert('Mandatory fields missing', hasAreaOptions
+                ? 'Select an access card and at least one access area.'
+                : 'Select an access card.')
               : handleIssue()}
-            style={[modalStyles.issueBtn, (!selectedCard || selectedAreas.length === 0) && { opacity: 0.4 }]}
+            style={[modalStyles.issueBtn, !canIssue && { opacity: 0.4 }]}
             activeOpacity={0.8}
           >
             <Icon name="card-plus-outline" size={20} color={Colors.white} />
@@ -586,10 +608,13 @@ const modalStyles = StyleSheet.create({
   dropdownItemActive: { backgroundColor: 'rgba(255,126,21,0.08)' },
   dropdownItemText: { flex: 1, fontFamily: 'SequelSans-BookBody', fontSize: 15, color: Colors.textPrimary },
   noCards: { padding: Spacing.lg, textAlign: 'center', fontFamily: 'SequelSans-BookBody', fontSize: 14, color: Colors.textMuted },
+  areasScroll: { maxHeight: 132 },
   areasGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm },
   areaChip: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: Spacing.md, paddingVertical: 8, borderRadius: BorderRadius.md, backgroundColor: Colors.secondarySurface, borderWidth: 1, borderColor: Colors.borderDefault },
   areaChipActive: { borderColor: Colors.accent300, backgroundColor: 'rgba(255,126,21,0.08)' },
   areaChipText: { fontFamily: 'SequelSans-BookBody', fontSize: 13, color: Colors.textSecondary },
+  noAreasBox: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.sm, padding: Spacing.md, borderRadius: BorderRadius.md, backgroundColor: Colors.secondarySurface, borderWidth: 1, borderColor: Colors.borderDefault },
+  noAreasText: { flex: 1, fontFamily: 'SequelSans-BookBody', fontSize: 13, lineHeight: 18, color: Colors.textSecondary },
   issueBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: Spacing.sm, height: 54, borderRadius: BorderRadius.md, backgroundColor: Colors.accent300, marginTop: Spacing.xl },
   issueBtnText: { fontFamily: 'SequelSans-MediumBody', fontSize: 15, color: Colors.white },
 });

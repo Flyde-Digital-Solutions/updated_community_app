@@ -17,6 +17,15 @@ export function isRfidCardAvailableForAssignment(card: RfidCard) {
   return canManageIssuedRfidCard(card) && !isRfidCardAssigned(card);
 }
 
+export function canSubmitAccessCardIssue(
+  cardId: string,
+  selectedAreas: string[],
+  availableAreaCount: number,
+) {
+  return Boolean(cardId.trim()) &&
+    (availableAreaCount === 0 || selectedAreas.length > 0);
+}
+
 const cardKey = (card: Pick<RfidCard, 'id' | 'uid'>) =>
   String(card.id || card.uid).trim().toLowerCase();
 
