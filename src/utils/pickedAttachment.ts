@@ -4,18 +4,22 @@ import type { FileAttachment } from '../types/domain';
 
 export const UPLOAD_TIMEOUT_MS = 120_000;
 
-/** Keep Android provider-backed files readable after the picker closes. */
+/** Keep picker-owned files readable after the picker closes on either platform. */
 export const pickedAttachment = async (
   file: DocumentPickerResponse,
+  fileName?: string,
 ): Promise<FileAttachment> => {
   const attachment: FileAttachment = {
     uri: file.uri,
-    name: file.name || 'document',
+    name: fileName || file.name || 'document',
     type: file.type || 'application/octet-stream',
     size: file.size || undefined,
   };
 
-  if (Platform.OS !== 'android' || !file.uri.startsWith('content://'))
+  const needsLocalCopy =
+    (Platform.OS === 'android' && file.uri.startsWith('content://')) ||
+    (Platform.OS === 'ios' && file.uri.startsWith('file://'));
+  if (!needsLocalCopy)
     return attachment;
 
   const [copy] = await keepLocalCopy({

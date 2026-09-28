@@ -16,6 +16,7 @@ export interface SessionUser {
   role: string;
   buildingId: string;
   buildingName: string;
+  buildingIds?: string[];
 }
 
 export interface BuildingOption {
@@ -27,6 +28,8 @@ export interface Ticket {
   id: string;
   /** Database identifier used by ticket detail/mutation endpoints. */
   backendId?: string;
+  /** Building scope required by ticket detail and mutation endpoints. */
+  buildingId?: string;
   subject: string;
   description: string;
   status: 'Open' | 'In Progress' | 'Resolved' | 'Closed';
@@ -45,6 +48,7 @@ export interface Ticket {
   clientId?: string;
   attachmentName?: string;
   attachmentUrl?: string;
+  attachments?: Array<{ name: string; url: string }>;
   syncState?: SyncState;
 }
 
@@ -146,6 +150,9 @@ export interface MeetingRoom {
   floor: string;
   capacity: number;
   status: 'Available' | 'Unavailable';
+  hourlyRate?: number;
+  creditPricePerHour?: number;
+  currency?: string;
   communityMaxDiscountPercent?: number;
 }
 
@@ -264,6 +271,20 @@ export interface Lead {
   phone: string;
   company: string;
   purpose: string;
+  gender?: string;
+  gstNo?: string;
+  gstTreatment?: string;
+  placeOfSupply?: string;
+  billingAddress?: {
+    address: string;
+    city: string;
+    state: string;
+    stateCode: string;
+    zip: string;
+    country: string;
+  };
+  buildingName?: string;
+  zohoSyncStatus?: string;
   address?: string;
   pincode?: string;
   status: 'New' | 'Contacted' | 'Qualified' | 'Converted' | 'Lost';
@@ -276,7 +297,7 @@ export interface Lead {
 export interface RfidCard {
   id: string;
   uid: string;
-  status: 'Active' | 'Inactive' | 'Lost';
+  status: 'Active' | 'Issued' | 'Inactive' | 'Lost';
   assignedTo?: string;
   company?: string;
   accessAreas: string[];

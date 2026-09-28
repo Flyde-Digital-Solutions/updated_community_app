@@ -116,7 +116,7 @@ export function EnterDetailsScreen() {
               <Text style={styles.title}>Enter your Details</Text>
 
               {/* Full Name */}
-              <Text style={styles.fieldLabel}>Full Name</Text>
+              <Text style={styles.fieldLabel}>Full Name *</Text>
               <InputField
                 placeholder="Full name"
                 value={fullName}
@@ -126,7 +126,7 @@ export function EnterDetailsScreen() {
               />
 
               {/* Email */}
-              <Text style={styles.fieldLabel}>Email Address</Text>
+              <Text style={styles.fieldLabel}>Email Address *</Text>
               <InputField
                 placeholder="Email address"
                 value={email}
@@ -140,7 +140,7 @@ export function EnterDetailsScreen() {
                 error={emailError}
               />
 
-              <Text style={styles.fieldLabel}>Mobile Number</Text>
+              <Text style={styles.fieldLabel}>Mobile Number *</Text>
               <InputField
                 placeholder="10-digit mobile number"
                 value={phone}
@@ -150,7 +150,7 @@ export function EnterDetailsScreen() {
                 containerStyle={styles.field}
               />
 
-              <Text style={styles.fieldLabel}>Password</Text>
+              <Text style={styles.fieldLabel}>Password *</Text>
               <InputField
                 placeholder="Minimum 6 characters"
                 value={password}
@@ -160,7 +160,7 @@ export function EnterDetailsScreen() {
               />
 
               {/* City */}
-              <Text style={styles.fieldLabel}>City</Text>
+              <Text style={styles.fieldLabel}>City *</Text>
               <View style={styles.dropdownWrapper}>
                 <TouchableOpacity
                   onPress={() => setShowCities(p => !p)}
@@ -220,7 +220,7 @@ export function EnterDetailsScreen() {
                   {terms && <Text style={styles.checkMark}>✓</Text>}
                 </View>
                 <View style={styles.checkTextCol}>
-                  <Text style={styles.checkLabel}>Terms & Conditions</Text>
+                  <Text style={styles.checkLabel}>Terms & Conditions *</Text>
                   <Text style={styles.checkDesc}>
                     By signing up you agree to our Terms & Conditions and Privacy Policy.
                   </Text>
@@ -232,6 +232,7 @@ export function EnterDetailsScreen() {
                 onPress={handleSignUp}
                 loading={loading}
                 disabled={!fullName || !email || phone.length !== 10 || password.length < 6 || !city || !terms}
+                onDisabledPress={() => Alert.alert('Mandatory fields missing', 'Complete your name, email, 10-digit mobile number, password, city, and accept the terms.')}
               />
               </View>
             </LinearGradient>

@@ -47,6 +47,7 @@ export const Routes = Object.freeze({
   ticketCategories: '/api/ticket-categories',
   staff: '/api/users/staff',
   guestSearch: '/api/leads/guests/search',
+  checkDuplicate: '/api/search/check-duplicate',
   meetingDiscountRequests: '/api/meeting-bookings/discount-requests',
   ticket: (id: string) => `/api/community/tickets/${encodeId(id)}`,
   visitor: (id: string) => `/api/community/visitors/${encodeId(id)}`,

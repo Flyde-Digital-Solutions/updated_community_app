@@ -1,4 +1,29 @@
-import { RoomBooking } from '../types/domain';
+import { Company, Member, RoomBooking } from '../types/domain';
+import { looksLikeInternalIdentifier } from './displayRecord';
+
+export function roomBookingCompanyName(
+  booking: Pick<RoomBooking, 'company' | 'clientId' | 'memberId'>,
+  companies: Pick<Company, 'id' | 'name'>[],
+  members: Pick<Member, 'id' | 'company' | 'companyId'>[],
+): string {
+  const member = members.find(item => item.id === booking.memberId);
+  const company = companies.find(item =>
+    item.id === booking.clientId ||
+    item.id === booking.company ||
+    item.id === member?.companyId,
+  );
+  if (company?.name) return company.name;
+  if (member?.company && !looksLikeInternalIdentifier(member.company))
+    return member.company;
+  return looksLikeInternalIdentifier(booking.company) ? '' : booking.company;
+}
+
+export function canPayRoomBooking(
+  booking: Pick<RoomBooking, 'status' | 'paymentMethod'>,
+): boolean {
+  return normalizeRoomBookingStatus(booking.status) === 'Payment Pending' &&
+    booking.paymentMethod !== 'credits';
+}
 
 export type RoomBookingProfileTarget = {
   type: 'member' | 'guest' | 'company';

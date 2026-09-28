@@ -33,6 +33,7 @@ interface Ticket {
   assignedTo?: string;
   attachmentName?: string;
   attachmentUrl?: string;
+  attachments?: Array<{ name: string; url: string }>;
 }
 
 const STATUS_CONFIG: Record<TicketStatus, { color: string; icon: string }> = {
@@ -89,6 +90,7 @@ export function TicketDetailScreen() {
     assignedTo: storedTicket.assignedTo,
     attachmentName: storedTicket.attachmentName,
     attachmentUrl: storedTicket.attachmentUrl,
+    attachments: storedTicket.attachments,
   } : null;
 
   const [ticket,          setTicket]          = useState<Ticket | null>(original);
@@ -114,6 +116,7 @@ export function TicketDetailScreen() {
       assignedTo: storedTicket.assignedTo,
       attachmentName: storedTicket.attachmentName,
       attachmentUrl: storedTicket.attachmentUrl,
+      attachments: storedTicket.attachments,
     });
   }, [storedTicket]);
 
@@ -205,27 +208,29 @@ export function TicketDetailScreen() {
           <Text style={styles.description}>
             Assignee: {ticket.assignedTo || 'Unassigned'}
           </Text>
-          {ticket.attachmentName ? (
+          {(ticket.attachments?.length
+            ? ticket.attachments
+            : ticket.attachmentName
+              ? [{ name: ticket.attachmentName, url: ticket.attachmentUrl || '' }]
+              : []
+          ).map((attachment, index) => (
             <TouchableOpacity
+              key={`${attachment.url}-${index}`}
               onPress={() =>
-                ticket.attachmentUrl
-                  ? downloadAuthenticatedFile(
-                      ticket.attachmentUrl,
-                      ticket.attachmentName || 'ticket-attachment',
-                    ).catch(error =>
-                      Alert.alert(
+                attachment.url
+                  ? downloadAuthenticatedFile(attachment.url, attachment.name, 'view')
+                      .catch(error => Alert.alert(
                         'Attachment unavailable',
                         error instanceof Error ? error.message : 'Please try again.',
-                      ),
-                    )
+                      ))
                   : Alert.alert('Attachment unavailable', 'The ticket response did not include a file URL.')
               }
             >
-              <Text style={[styles.description, { color: Colors.accent300, textDecorationLine: 'underline' }]}>
-                Attachment: {ticket.attachmentName}
+              <Text numberOfLines={2} ellipsizeMode="middle" style={[styles.description, { color: Colors.accent300, textDecorationLine: 'underline' }]}>
+                Attachment: {attachment.name}
               </Text>
             </TouchableOpacity>
-          ) : null}
+          ))}
         </View>
 
         {/* Member Info */}

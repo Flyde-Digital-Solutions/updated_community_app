@@ -65,6 +65,7 @@ export function OtpScreen() {
           </Text>
 
           <View style={styles.otpRow}>
+            <Text style={{ color: Colors.textSecondary, marginBottom: Spacing.sm }}>Verification code *</Text>
             <OtpInput
               length={6}
               onChange={setOtp}
@@ -74,6 +75,8 @@ export function OtpScreen() {
           <OrangeButton
             label="Verify Contact no."
             onPress={() => handleVerify()}
+            disabled={otp.trim().length !== 6}
+            onDisabledPress={() => Alert.alert('Mandatory fields missing', 'Enter the complete 6-digit verification code.')}
             loading={loading}
             style={styles.btn}
           />

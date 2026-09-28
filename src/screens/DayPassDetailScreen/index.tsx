@@ -11,8 +11,12 @@ import { Colors, Typography, Spacing, BorderRadius } from '../../theme';
 import { RootStackParamList } from '../../navigation/MainStackNavigator';
 import { useApp } from '../../context/AppContext';
 import { BackendRecordUnavailable } from '../../components/BackendRecordUnavailable';
-import { normalizeDayPassStatus } from '../../utils/dayPass';
+import { canPayDayPass, dayPassDisplayName, normalizeDayPassStatus } from '../../utils/dayPass';
+import { isRfidCardAvailableForAssignment } from '../../utils/rfidCard';
 import { openExternalLink } from '../../utils/openExternalLink';
+import { apiClient } from '../../services/apiClient';
+import { Routes } from '../../services/routes';
+import { paymentOrderFrom } from '../../utils/razorpay';
 
 
 type RouteProps = RouteProp<RootStackParamList, 'DayPassDetailScreen'>;
@@ -35,6 +39,7 @@ interface DayPass {
   id: string;
   customerId?: string;
   memberName: string;
+  email: string;
   companyName: string;
   phone: string;
   gender?: Gender;
@@ -44,6 +49,7 @@ interface DayPass {
   checkInTime?: string;
   kycVerified: boolean;
   bookingSource?: BookingSource;
+  paymentMethod?: 'credits' | 'razorpay';
   amount: number;
   bookingFor?: string;
   bookedAt?: string;
@@ -143,7 +149,7 @@ function AccessCardModal({
           <Text style={modalStyles.title}>Issue Access Card</Text>
           <Text style={modalStyles.subtitle}>to {memberName}</Text>
 
-          <Text style={modalStyles.label}>Select Access Card</Text>
+          <Text style={modalStyles.label}>Select Access Card *</Text>
           <TouchableOpacity
             onPress={() => setShowDropdown(p => !p)}
             style={[modalStyles.dropdownBtn, selectedCard ? { borderColor: Colors.accent300 } : {}]}
@@ -192,7 +198,7 @@ function AccessCardModal({
             </View>
           )}
 
-          <Text style={[modalStyles.label, { marginTop: Spacing.lg }]}>Access Areas</Text>
+          <Text style={[modalStyles.label, { marginTop: Spacing.lg }]}>Access Areas *</Text>
           <View style={modalStyles.areasGrid}>
             {accessAreas.map(area => {
               const isSelected = selectedAreas.includes(area);
@@ -217,8 +223,10 @@ function AccessCardModal({
           </View>
 
           <TouchableOpacity
-            onPress={() => { onIssue(selectedCard, selectedAreas); setSelectedCard(''); setSelectedAreas([]); }}
-            disabled={!selectedCard || selectedAreas.length === 0}
+            onPress={() => {
+              if (!selectedCard || selectedAreas.length === 0) return Alert.alert('Mandatory fields missing', 'Select an access card and at least one access area.');
+              onIssue(selectedCard, selectedAreas); setSelectedCard(''); setSelectedAreas([]);
+            }}
             style={[modalStyles.issueBtn, (!selectedCard || selectedAreas.length === 0) && { opacity: 0.4 }]}
             activeOpacity={0.8}
           >
@@ -247,6 +255,7 @@ export function DayPassDetailScreen() {
     id: storedPass.id,
     customerId: storedPass.customerId,
     memberName: storedPass.name,
+    email: storedPass.email,
     companyName: storedPass.company || '',
     phone: storedPass.phone,
     gender: storedPass.gender,
@@ -255,6 +264,7 @@ export function DayPassDetailScreen() {
     checkInStatus: normalizeDayPassStatus(storedPass.status),
     kycVerified: storedPass.kycVerified,
     bookingSource: storedPass.bookingSource,
+    paymentMethod: storedPass.paymentMethod,
     checkInTime: storedPass.checkInTime,
     amount: storedPass.amount,
     bookingFor: storedPass.bookingFor,
@@ -271,6 +281,7 @@ export function DayPassDetailScreen() {
   }) : null, [dayPasses, storedAccessCard, storedPass, tickets]);
   const [pass,          setPass]          = useState<DayPass | null>(original);
   const [showCardModal, setShowCardModal] = useState(false);
+  const [paying, setPaying] = useState(false);
 
   useEffect(() => {
     setPass(original);
@@ -281,8 +292,20 @@ export function DayPassDetailScreen() {
   }
 
   const statusCfg = CHECK_IN_CONFIG[pass.checkInStatus] ?? DEFAULT_STATUS_CONFIG;
+  const paymentDue = canPayDayPass({
+    status: pass.checkInStatus,
+    paymentMethod: pass.paymentMethod,
+  });
+  const visibleVisitHistory = pass.visitHistory.filter(
+    visit => visit.checkInStatus !== 'Payment Pending',
+  );
   const sourceCfg = pass.bookingSource ? SOURCE_CONFIG[pass.bookingSource] : null;
-  const displayName = pass.memberName.trim() || `${pass.bookingFor || 'Day pass'} booking`;
+  const bookedVia = pass.paymentMethod === 'razorpay'
+    ? 'Razorpay'
+    : pass.paymentMethod === 'credits'
+      ? 'Credits'
+      : pass.bookingSource || 'Not provided';
+  const displayName = dayPassDisplayName({ name: pass.memberName, company: pass.companyName });
   const initials = pass.memberName.trim()
     ? pass.memberName.split(' ').map(name => name[0]).join('').slice(0, 2)
     : 'DP';
@@ -310,6 +333,35 @@ export function DayPassDetailScreen() {
       Alert.alert('Card issued', 'The access card was assigned successfully.');
     } catch (error) {
       Alert.alert('Card not issued', error instanceof Error ? error.message : 'Please try again.');
+    }
+  };
+
+  const handlePayment = async () => {
+    if (!canPayDayPass({ status: pass.checkInStatus, paymentMethod: pass.paymentMethod }) || paying)
+      return;
+    setPaying(true);
+    try {
+      const response = await apiClient.post<Record<string, unknown>>(
+        Routes.razorpayCreateOrder,
+        { dayPassId: pass.id },
+      );
+      const order = paymentOrderFrom(response);
+      if (order?.noPaymentRequired) {
+        Alert.alert('No payment required', 'This day pass does not have an amount to pay. Refresh the list to see its latest status.');
+        return;
+      }
+      if (!order)
+        throw new Error('The payment service did not return a valid order and amount. Please try again.');
+      navigation.navigate('RazorpayCheckoutScreen', {
+        order,
+        prefill: { name: pass.memberName, email: pass.email, contact: pass.phone },
+        context: { dayPassId: pass.id, amount: order.amount },
+        title: 'Day Pass Payment',
+      });
+    } catch (error) {
+      Alert.alert('Payment unavailable', error instanceof Error ? error.message : 'Please try again.');
+    } finally {
+      setPaying(false);
     }
   };
 
@@ -352,12 +404,14 @@ export function DayPassDetailScreen() {
               {!!pass.memberSince && <Text style={styles.memberSince}>Member since {pass.memberSince}</Text>}
               {!pass.memberSince && !!bookedLabel && <Text style={styles.memberSince}>{bookedLabel}</Text>}
             </View>
-            <View style={[styles.statusBadge, { backgroundColor: `${statusCfg.color}22`, borderColor: statusCfg.color }]}>
-              <Icon name={statusCfg.icon} size={14} color={statusCfg.color} />
-              <Text style={[styles.statusText, { color: statusCfg.color }]}>
-                {pass.checkInStatus === 'Checked In' ? (pass.checkInTime || 'Checked In') : pass.checkInStatus}
-              </Text>
-            </View>
+            {!paymentDue ? (
+              <View style={[styles.statusBadge, { backgroundColor: `${statusCfg.color}22`, borderColor: statusCfg.color }]}>
+                <Icon name={statusCfg.icon} size={14} color={statusCfg.color} />
+                <Text style={[styles.statusText, { color: statusCfg.color }]}>
+                  {pass.checkInStatus === 'Checked In' ? (pass.checkInTime || 'Checked In') : pass.checkInStatus}
+                </Text>
+              </View>
+            ) : null}
           </View>
         </View>
 
@@ -399,11 +453,9 @@ export function DayPassDetailScreen() {
           <View style={styles.infoRow}>
             <Icon name="source-branch" size={16} color={Colors.textSecondary} />
             <Text style={styles.infoLabel}>Booked Via</Text>
-            {sourceCfg && pass.bookingSource && (
-              <View style={[styles.sourceBadge, { backgroundColor: sourceCfg.bg }]}>
-                <Text style={[styles.sourceText, { color: sourceCfg.color }]}>{pass.bookingSource}</Text>
-              </View>
-            )}
+            <View style={[styles.sourceBadge, { backgroundColor: sourceCfg?.bg || 'rgba(255,126,21,0.15)' }]}>
+              <Text style={[styles.sourceText, { color: sourceCfg?.color || Colors.accent300 }]}>{bookedVia}</Text>
+            </View>
           </View>
           {!!pass.phone && (
             <>
@@ -492,7 +544,7 @@ export function DayPassDetailScreen() {
         {/* Visit History */}
         <Text style={styles.sectionLabel}>Visit History</Text>
         <View style={styles.card}>
-          {pass.visitHistory.map((visit, i) => {
+          {visibleVisitHistory.map((visit, i) => {
             const vCfg = CHECK_IN_CONFIG[visit.checkInStatus] ?? DEFAULT_STATUS_CONFIG;
             return (
               <View key={i}>
@@ -503,7 +555,7 @@ export function DayPassDetailScreen() {
                     {visit.checkInStatus === 'Checked In' ? `Checked in at ${visit.checkInTime}` : visit.checkInStatus}
                   </Text>
                 </View>
-                {i < pass.visitHistory.length - 1 && <View style={styles.divider} />}
+                {i < visibleVisitHistory.length - 1 && <View style={styles.divider} />}
               </View>
             );
           })}
@@ -562,13 +614,26 @@ export function DayPassDetailScreen() {
             <Text style={styles.checkInBtnText}>Provision Access</Text>
           </TouchableOpacity>
         )}
+        {paymentDue && (
+          <TouchableOpacity
+            accessibilityRole="button"
+            accessibilityLabel="Complete day pass payment"
+            onPress={handlePayment}
+            disabled={paying}
+            style={[styles.checkInBtn, paying && { opacity: 0.5 }]}
+            activeOpacity={0.8}
+          >
+            <Icon name="credit-card-outline" size={20} color={Colors.white} />
+            <Text style={styles.checkInBtnText}>{paying ? 'Preparing Payment…' : 'Complete Payment'}</Text>
+          </TouchableOpacity>
+        )}
       </View>
 
       <AccessCardModal
         visible={showCardModal}
         memberName={pass.memberName}
         usedCards={pass.accessCard ? [pass.accessCard.cardId] : []}
-        availableCards={rfidCards.filter(card => card.status === 'Active' && !card.assignedTo).map(card => ({ value: card.id, label: card.uid || 'Access card' }))}
+        availableCards={rfidCards.filter(isRfidCardAvailableForAssignment).map(card => ({ value: card.id, label: card.uid || 'Access card' }))}
         accessAreas={commonAreas.filter(area => area.status === 'Available').map(area => area.name)}
         onClose={() => setShowCardModal(false)}
         onIssue={handleIssueCard}

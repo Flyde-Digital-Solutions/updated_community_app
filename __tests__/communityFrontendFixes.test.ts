@@ -15,6 +15,8 @@ import { Company, Member } from '../src/types/domain';
 import {
   normalizeRoomBookingStatus,
   resolveRoomBookingProfileTarget,
+  roomBookingCompanyName,
+  canPayRoomBooking,
 } from '../src/utils/roomBooking';
 import { formatTimeRange } from '../src/utils/timeRange';
 import {
@@ -37,6 +39,12 @@ describe('Community frontend integration fixes', () => {
       'Payment Pending',
     );
     expect(normalizeRoomBookingStatus('unexpected status')).toBe('Pending');
+  });
+
+  it('offers payment only for an unpaid Razorpay room booking', () => {
+    expect(canPayRoomBooking({ status: 'Payment Pending', paymentMethod: 'razorpay' })).toBe(true);
+    expect(canPayRoomBooking({ status: 'Payment Pending', paymentMethod: 'credits' })).toBe(false);
+    expect(canPayRoomBooking({ status: 'Confirmed', paymentMethod: 'razorpay' })).toBe(false);
   });
 
   it('opens only an available profile for a meeting-room booking', () => {
@@ -70,6 +78,14 @@ describe('Community frontend integration fixes', () => {
         new Set(),
       ),
     ).toBeNull();
+  });
+
+  it('shows a company name instead of a raw ID on a room booking', () => {
+    const id = '6a9aa2b20d22944f9664f744';
+    const booking = { memberId: 'member-1', clientId: id, company: id };
+    expect(roomBookingCompanyName(booking, [{ id, name: 'Ofis Square' }], [])).toBe('Ofis Square');
+    expect(roomBookingCompanyName(booking, [], [{ id: 'member-1', companyId: id, company: 'Ofis Square' }])).toBe('Ofis Square');
+    expect(roomBookingCompanyName(booking, [], [])).toBe('');
   });
 
   it('resolves member company IDs to company names', () => {

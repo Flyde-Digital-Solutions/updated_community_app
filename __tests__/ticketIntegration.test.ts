@@ -13,6 +13,7 @@ describe('ticket API normalization', () => {
         categoryId: { _id: '6a425113433d229dc19e7092', name: 'Meeting Rooms' },
         subCategory: { _id: 'subcategory-id', name: 'AV Equipment' },
       },
+      building: { _id: 'building-id', name: '12th Floor' },
       createdBy: '69f5ab1c9e51117f5c56a29e',
     });
 
@@ -22,6 +23,7 @@ describe('ticket API normalization', () => {
       category: 'Meeting Rooms',
       categoryId: '6a425113433d229dc19e7092',
       subCategory: 'subcategory-id',
+      buildingId: 'building-id',
       memberName: '',
     });
   });

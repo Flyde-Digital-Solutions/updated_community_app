@@ -16,6 +16,7 @@ import { apiClient } from '../../services/apiClient';
 import { Routes } from '../../services/routes';
 import { KeyboardSafeScrollView } from '../../components/molecules/KeyboardSafeScrollView';
 import { selectedRoomAvailability } from '../../utils/roomAvailability';
+import { meetingRoomCreditAmount, meetingRoomPayableAmount } from '../../utils/meetingRoomPrice';
 
 type Navigation = NativeStackNavigationProp<RootStackParamList, 'AddRoomBookingScreen'>;
 
@@ -101,7 +102,7 @@ export function AddRoomBookingScreen() {
   const [discountPercent, setDiscountPercent] = useState('0');
   const [discountReason, setDiscountReason] = useState('Community promotional discount');
   const [useBuildingDiscount, setUseBuildingDiscount] = useState(true);
-  const [bookingOutcome, setBookingOutcome] = useState<'confirmed' | 'approval_pending' | 'payment_pending'>('confirmed');
+  const [bookingOutcome, setBookingOutcome] = useState<'confirmed' | 'approval_pending'>('confirmed');
 
   const [submitting, setSubmitting] = useState(false);
   const [done,       setDone]       = useState(false);
@@ -119,7 +120,10 @@ export function AddRoomBookingScreen() {
     apiClient.get<Record<string, unknown>>(Routes.creditsSummary(selectedMember.companyId)).then(response => {
       const raw = response.data && typeof response.data === 'object' ? response.data as Record<string, unknown> : response;
       const balance = raw.availableCredits ?? raw.balance ?? raw.credits ?? raw.remainingCredits;
-      setCreditInfo(balance == null ? 'Credit summary loaded' : `${Number(balance).toLocaleString('en-IN')} credits available`);
+      const numericBalance = Number(balance);
+      setCreditInfo(balance != null && Number.isFinite(numericBalance)
+        ? `${numericBalance.toLocaleString('en-IN')} credits available`
+        : 'Credit balance unavailable');
     }).catch(() => setCreditInfo('Credit summary unavailable'));
   }, [selectedMember?.companyId]);
 
@@ -156,15 +160,31 @@ export function AddRoomBookingScreen() {
     (bookingType === 'member'
       ? !!selectedMember
       : !!selectedGuest);
+  const missingBookingFields = [
+    bookingType === 'member' && !selectedMember && 'Member',
+    bookingType === 'walkin' && !selectedGuest && 'On-demand guest',
+    paymentMethod === 'razorpay' && Number(discountPercent) > 0 && !discountReason.trim() && 'Discount reason',
+  ].filter((item): item is string => Boolean(item));
 
   const manualDiscount = paymentMethod === 'razorpay' ? Number(discountPercent) || 0 : 0;
   const buildingDiscountCap = building?.communityDiscountMaxPercent ?? 10;
   const discountCap = useBuildingDiscount
     ? buildingDiscountCap
     : selectedRoom.communityMaxDiscountPercent ?? buildingDiscountCap;
+  const durationHours = endHour - startHour;
+  const payableAmount = meetingRoomPayableAmount(
+    selectedRoom.hourlyRate,
+    durationHours,
+    manualDiscount,
+  );
+  const payableCredits = meetingRoomCreditAmount(
+    selectedRoom.creditPricePerHour,
+    durationHours,
+  );
 
   const handleSubmit = async () => {
-    if (!isValid) return;
+    if (missingBookingFields.length) return Alert.alert('Mandatory fields missing', `Please complete: ${missingBookingFields.join(', ')}.`);
+    if (hasConflict) return Alert.alert('Time slot unavailable', 'Choose a time slot that does not overlap an existing booking.');
     if (manualDiscount < 0 || manualDiscount > 100) return Alert.alert('Invalid discount', 'Enter a discount between 0 and 100%.');
     if (paymentMethod === 'razorpay' && manualDiscount > 0 && !discountReason.trim()) return Alert.alert('Reason required', 'Enter a reason for the manual discount.');
     setSubmitting(true);
@@ -198,17 +218,24 @@ export function AddRoomBookingScreen() {
           usingDefaultBuildingDiscount: useBuildingDiscount,
         } : {}),
       });
-      setBookingOutcome(booking.discountStatus === 'pending' || booking.status === 'Approval Pending'
-        ? 'approval_pending'
-        : booking.status === 'Payment Pending' ? 'payment_pending' : 'confirmed');
-      setDone(true);
-      if (paymentMethod === 'razorpay' && booking.discountStatus !== 'pending' && booking.status !== 'Approval Pending' && (booking.paymentOrder || booking.paymentUrl)) {
-        if (booking.paymentOrder?.noPaymentRequired) return;
+      const approvalPending =
+        booking.discountStatus === 'pending' ||
+        booking.status === 'Approval Pending';
+      if (approvalPending) {
+        setBookingOutcome('approval_pending');
+        setDone(true);
+      } else if (paymentMethod === 'razorpay') {
+        if (booking.paymentOrder?.noPaymentRequired) {
+          setBookingOutcome('confirmed');
+          setDone(true);
+          return;
+        }
         if (booking.paymentOrder) {
+          const paymentOrder = booking.paymentOrder;
           navigation.replace('RazorpayCheckoutScreen', {
-            order: { key: booking.paymentOrder.key, amount: booking.paymentOrder.amount, orderId: booking.paymentOrder.orderId, description: booking.paymentOrder.description },
+            order: { key: paymentOrder.key, amount: paymentOrder.amount, orderId: paymentOrder.orderId, description: paymentOrder.description },
             prefill: { name: memberName, email: selectedGuest?.email, contact: selectedGuest?.phone },
-            context: { meetingBookingId: booking.id, amount: booking.paymentOrder.amount },
+            context: { meetingBookingId: booking.id, amount: paymentOrder.amount },
             title: 'Meeting Room Payment',
           });
         } else if (booking.paymentUrl) {
@@ -217,7 +244,16 @@ export function AddRoomBookingScreen() {
             context: { meetingBookingId: booking.id },
             title: 'Meeting Room Payment',
           });
+        } else {
+          Alert.alert(
+            'Payment could not start',
+            'The booking was created, but the payment service did not return a payable order. Open the booking and use Complete Payment.',
+            [{ text: 'View bookings', onPress: () => navigation.replace('AllRoomBookingsScreen') }],
+          );
         }
+      } else {
+        setBookingOutcome('confirmed');
+        setDone(true);
       }
     } catch (error) {
       Alert.alert('Booking failed', error instanceof Error ? error.message : 'Please try again.');
@@ -252,7 +288,7 @@ export function AddRoomBookingScreen() {
               <Icon name="calendar-check" size={40} color={Colors.white} />
             </View>
           </View>
-          <Text style={styles.successTitle}>{bookingOutcome === 'approval_pending' ? 'Approval Requested' : bookingOutcome === 'payment_pending' ? 'Payment Pending' : 'Booking Confirmed!'}</Text>
+          <Text style={styles.successTitle}>{bookingOutcome === 'approval_pending' ? 'Approval Requested' : 'Booking Confirmed!'}</Text>
           <Text style={styles.successSub}>
             {bookingOutcome === 'approval_pending'
               ? 'Discount request sent for approval. The slot remains reserved and payment has not started.'
@@ -283,7 +319,7 @@ export function AddRoomBookingScreen() {
       >
 
         {/* Room Selector */}
-        <Text style={styles.sectionLabel}>Room</Text>
+        <Text style={styles.sectionLabel}>Room *</Text>
         <TouchableOpacity
           onPress={() => setShowRoomPicker(p => !p)}
           style={styles.roomSelector}
@@ -324,7 +360,7 @@ export function AddRoomBookingScreen() {
         )}
 
         {/* Date Selector */}
-        <Text style={styles.sectionLabel}>Date</Text>
+        <Text style={styles.sectionLabel}>Date *</Text>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.dateScroll} contentContainerStyle={styles.dateScrollContent}>
           {DATE_OPTIONS.map(date => (
             <TouchableOpacity
@@ -341,13 +377,14 @@ export function AddRoomBookingScreen() {
         </ScrollView>
 
         {/* Time Selector */}
-        <Text style={styles.sectionLabel}>Time Slot</Text>
+        <Text style={styles.sectionLabel}>Time Slot *</Text>
         <View style={styles.card}>
           <Text style={styles.timeHelper}>
             Choose a start and end time. Existing bookings are listed below.
           </Text>
           <DropdownField
             label="Start time"
+            required
             value={String(startHour)}
             options={ROOM_TIME_OPTIONS.slice(0, -1)}
             onChange={value => {
@@ -359,6 +396,7 @@ export function AddRoomBookingScreen() {
           />
           <DropdownField
             label="End time"
+            required
             value={String(endHour)}
             options={ROOM_TIME_OPTIONS.filter(
               option => Number(option.value) > startHour,
@@ -396,8 +434,29 @@ export function AddRoomBookingScreen() {
           {availabilityInfo ? <Text style={styles.discountHint}>{availabilityInfo}</Text> : null}
         </View>
 
+        <Text style={styles.sectionLabel}>Booking price</Text>
+        <View style={styles.priceCard}>
+          <Text style={styles.priceAmount}>
+            {paymentMethod === 'credits'
+              ? payableCredits > 0
+                ? `${payableCredits.toLocaleString('en-IN')} credits`
+                : 'Credit price unavailable'
+              : payableAmount > 0
+              ? `₹${payableAmount.toLocaleString('en-IN', {
+                  minimumFractionDigits: 2,
+                  maximumFractionDigits: 2,
+                })}`
+              : 'Price unavailable'}
+          </Text>
+          <Text style={styles.discountHint}>
+            {paymentMethod === 'credits'
+              ? `${selectedRoom.creditPricePerHour || 0} credits/hour × ${durationHours} hour${durationHours === 1 ? '' : 's'}`
+              : `₹${(selectedRoom.hourlyRate || 0).toLocaleString('en-IN')}/hour × ${durationHours} hour${durationHours === 1 ? '' : 's'}, including 18% tax${manualDiscount > 0 ? ` and ${manualDiscount}% discount` : ''}.`}
+          </Text>
+        </View>
+
         {/* Booking Type Toggle */}
-        <Text style={styles.sectionLabel}>Booked For</Text>
+        <Text style={styles.sectionLabel}>Booked For *</Text>
         <View style={styles.toggleRow}>
           <TouchableOpacity
             onPress={() => setBookingType('member')}
@@ -420,6 +479,7 @@ export function AddRoomBookingScreen() {
         {/* Member Search */}
         {bookingType === 'member' && (
           <View style={styles.card}>
+            <Text style={styles.walkinLabel}>Member *</Text>
             {selectedMember ? (
               <View style={styles.selectedMemberRow}>
                 <View style={styles.memberAvatar}>
@@ -485,6 +545,7 @@ export function AddRoomBookingScreen() {
           <View style={styles.card}>
             <DropdownField
               label="On-demand guest"
+              required
               value={selectedGuestId}
               options={onDemandUsers.map(guest => ({ value: guest.id, label: [guest.name, guest.phone].filter(Boolean).join(' · ') }))}
               onChange={setSelectedGuestId}
@@ -495,7 +556,7 @@ export function AddRoomBookingScreen() {
           </View>
         )}
 
-        <Text style={styles.sectionLabel}>Payment & Discount</Text>
+        <Text style={styles.sectionLabel}>Payment method *</Text>
         <View style={styles.toggleRow}>
           {(['razorpay', 'credits'] as const).map(method => (
             <TouchableOpacity key={method} onPress={() => setPaymentMethod(method)} style={[styles.toggleBtn, paymentMethod === method && styles.toggleBtnActive]} activeOpacity={0.7}>
@@ -514,7 +575,7 @@ export function AddRoomBookingScreen() {
               </View>
             </View>
             <View style={styles.walkinField}>
-              <Text style={styles.walkinLabel}>Discount reason</Text>
+              <Text style={styles.walkinLabel}>Discount reason{manualDiscount > 0 ? ' *' : ''}</Text>
               <View style={styles.walkinInput}>
                 <Icon name="text-box-outline" size={18} color={Colors.textMuted} />
                 <TextInput style={styles.walkinTextInput} value={discountReason} onChangeText={setDiscountReason} placeholder="Reason for discount" placeholderTextColor={Colors.textMuted} />
@@ -560,8 +621,8 @@ export function AddRoomBookingScreen() {
       <View style={[styles.bottomBar, { paddingBottom: insets.bottom + 16 }]}>
         <TouchableOpacity
           onPress={handleSubmit}
-          disabled={!isValid || submitting}
-          style={[styles.submitBtn, (!isValid || submitting) && { opacity: 0.4 }]}
+          disabled={submitting}
+          style={[styles.submitBtn, (!isValid || missingBookingFields.length > 0 || submitting) && { opacity: 0.4 }]}
           activeOpacity={0.8}
         >
           {submitting ? (
@@ -569,7 +630,9 @@ export function AddRoomBookingScreen() {
           ) : (
             <>
               <Icon name="calendar-plus" size={20} color={Colors.white} />
-              <Text style={styles.submitBtnText}>Confirm Booking</Text>
+              <Text style={styles.submitBtnText}>
+                {paymentMethod === 'razorpay' ? 'Pay & Book' : 'Confirm Booking'}
+              </Text>
             </>
           )}
         </TouchableOpacity>
@@ -628,6 +691,19 @@ const styles = StyleSheet.create({
   card: {
     backgroundColor: Colors.cardSurface, borderRadius: BorderRadius.md,
     padding: Spacing.lg, borderWidth: 1, borderColor: Colors.borderDefault,
+  },
+  priceCard: {
+    backgroundColor: Colors.cardSurface,
+    borderRadius: BorderRadius.md,
+    borderWidth: 1,
+    borderColor: Colors.accent300,
+    padding: Spacing.lg,
+  },
+  priceAmount: {
+    fontFamily: 'SequelSans-SemiBoldBody',
+    fontSize: 28,
+    color: Colors.textPrimary,
+    marginBottom: Spacing.xs,
   },
   availabilityButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: Spacing.sm, borderTopWidth: 1, borderTopColor: Colors.borderDefault, marginTop: Spacing.md, paddingTop: Spacing.md },
   availabilityButtonText: { ...Typography.caption, color: Colors.accent300 },

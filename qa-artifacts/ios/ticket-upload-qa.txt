@@ -1,0 +1,4 @@
+Community App QA attachment
+
+This document is a non-MP3 office-file upload test for ticket OSM-I54.
+It contains no personal or production data.

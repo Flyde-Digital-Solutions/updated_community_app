@@ -171,7 +171,7 @@ export function ViewGuestsScreen() {
   const navigation = useNavigation<Nav>();
   const insets     = useSafeAreaInsets();
   const { visitors, setVisitorStatus } = useApp();
-  const [serverStats, setServerStats] = useState<Record<string, number>>({});
+  const [, setServerStats] = useState<Record<string, number>>({});
   useEffect(() => {
     apiClient.get<Record<string, unknown>>(Routes.community.visitorStats).then(response => {
       const root = response.data && typeof response.data === 'object' ? response.data as Record<string, unknown> : response;

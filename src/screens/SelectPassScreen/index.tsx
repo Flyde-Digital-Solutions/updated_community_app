@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import {
   View, Text, StyleSheet, ImageBackground,
-  Image, TouchableOpacity, ScrollView,
+  Alert, Image, TouchableOpacity, ScrollView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import LinearGradient from 'react-native-linear-gradient';
@@ -148,6 +148,7 @@ export function SelectPassScreen() {
             <Text style={styles.title}>Select your Pass</Text>
 
             {/* Location */}
+            <Text style={styles.passHeaderLabel}>Location *</Text>
             <View style={styles.locationWrapper}>
               <TouchableOpacity
                 onPress={() => setShowLocations(p => !p)}
@@ -332,6 +333,10 @@ export function SelectPassScreen() {
               label={selectedPass === 'single' ? 'Proceed to Pay' : 'Buy Bundle'}
               loading={loading}
               disabled={!selectedBuilding || selectedBuilding.price <= 0}
+              onDisabledPress={() => Alert.alert(
+                selectedBuilding ? 'Pricing unavailable' : 'Mandatory fields missing',
+                selectedBuilding ? 'A pass price is not configured for this location.' : 'Select a location.',
+              )}
               onPress={() => navigation.navigate('AllSetOnDemandScreen')}
             />
           </View>

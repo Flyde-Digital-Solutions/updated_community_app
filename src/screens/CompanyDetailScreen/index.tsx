@@ -111,17 +111,19 @@ function DirectNotificationModal({
             <>
               <Text style={modalStyles.title}>Notify Company</Text>
               <Text style={modalStyles.subtitle}>Send to all members of {companyName}</Text>
-              <Text style={modalStyles.label}>Title</Text>
+              <Text style={modalStyles.label}>Title *</Text>
               <View style={modalStyles.inputWrapper}>
                 <TextInput style={modalStyles.input} value={title} onChangeText={setTitle} placeholder="Notification title..." placeholderTextColor={Colors.textMuted} />
               </View>
-              <Text style={modalStyles.label}>Message</Text>
+              <Text style={modalStyles.label}>Message *</Text>
               <View style={modalStyles.messageWrapper}>
                 <TextInput style={modalStyles.messageInput} value={message} onChangeText={setMessage} placeholder="Write your message..." placeholderTextColor={Colors.textMuted} multiline textAlignVertical="top" />
               </View>
               <TouchableOpacity
-                onPress={handleSend}
-                disabled={!title.trim() || !message.trim() || sending}
+                onPress={() => !title.trim() || !message.trim()
+                  ? Alert.alert('Mandatory fields missing', 'Enter a title and message.')
+                  : handleSend()}
+                disabled={sending}
                 style={[modalStyles.sendBtn, (!title.trim() || !message.trim() || sending) && { opacity: 0.4 }]}
                 activeOpacity={0.8}
               >
@@ -279,7 +281,19 @@ export function CompanyDetailScreen() {
             <Text style={styles.contactBtnText}>Notify</Text>
           </TouchableOpacity>
           <TouchableOpacity
-            onPress={() => downloadAuthenticatedFile(Routes.clientRfidExport(company.id), `${company.name.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}-rfid.xlsx`).catch(error => Alert.alert('Export failed', error instanceof Error ? error.message : 'Please try again.'))}
+            onPress={async () => {
+              const fileName = `${company.name.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}-rfid.xlsx`;
+              try {
+                await downloadAuthenticatedFile(
+                  Routes.clientRfidExport(company.id),
+                  fileName,
+                  'download',
+                );
+                Alert.alert('Export downloaded', `${fileName} was saved to this device.`);
+              } catch (error) {
+                Alert.alert('Export failed', error instanceof Error ? error.message : 'Please try again.');
+              }
+            }}
             style={styles.contactBtn}
             activeOpacity={0.7}
           >

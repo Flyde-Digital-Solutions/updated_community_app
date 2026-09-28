@@ -234,10 +234,10 @@ export function ScanVisitorScreen() {
       {/* Manual token entry also makes the flow testable on simulators without a camera. */}
       {showManualEntry && (
         <View style={styles.simulateContainer}>
-          <Text style={styles.simulateLabel}>Invitation code</Text>
+          <Text style={styles.simulateLabel}>Invitation code *</Text>
           <View style={styles.tokenRow}>
             <TextInput value={scanToken} onChangeText={setScanToken} placeholder="e.g. V001" placeholderTextColor={Colors.textMuted} autoCapitalize="characters" style={styles.tokenInput} />
-            <TouchableOpacity onPress={() => processToken()} disabled={!scanToken.trim()} style={[styles.processButton, !scanToken.trim() && { opacity: 0.4 }]} activeOpacity={0.8}><Text style={styles.processButtonText}>Process</Text></TouchableOpacity>
+            <TouchableOpacity onPress={() => !scanToken.trim() ? Alert.alert('Mandatory fields missing', 'Enter an invitation code.') : processToken()} style={[styles.processButton, !scanToken.trim() && { opacity: 0.4 }]} activeOpacity={0.8}><Text style={styles.processButtonText}>Process</Text></TouchableOpacity>
           </View>
           <TextInput value={badgeId} onChangeText={setBadgeId} placeholder="Badge number (optional)" placeholderTextColor={Colors.textMuted} autoCapitalize="characters" style={[styles.tokenInput, styles.optionalInput]} />
           <TextInput value={notes} onChangeText={setNotes} placeholder="Reception notes (optional)" placeholderTextColor={Colors.textMuted} style={[styles.tokenInput, styles.optionalInput]} />

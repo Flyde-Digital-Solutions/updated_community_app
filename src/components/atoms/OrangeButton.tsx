@@ -10,6 +10,7 @@ interface Props {
   onPress: () => void;
   loading?: boolean;
   disabled?: boolean;
+  onDisabledPress?: () => void;
   icon?: React.ReactNode;
   iconPosition?: 'left' | 'right';
   style?: ViewStyle;
@@ -17,12 +18,12 @@ interface Props {
 }
 
 export const OrangeButton: React.FC<Props> = ({
-  label, onPress, loading = false, disabled = false,
+  label, onPress, loading = false, disabled = false, onDisabledPress,
   icon, iconPosition = 'right', style, textStyle,
 }) => (
   <TouchableOpacity
-    onPress={onPress}
-    disabled={disabled || loading}
+    onPress={disabled ? onDisabledPress : onPress}
+    disabled={loading || (disabled && !onDisabledPress)}
     activeOpacity={0.8}
     style={[styles.button, disabled && styles.disabled, style]}
   >

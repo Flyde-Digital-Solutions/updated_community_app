@@ -38,10 +38,17 @@ import {
   Ticket,
   Visitor,
 } from '../types/domain';
-import { normalizeDayPassStatus } from '../utils/dayPass';
+import { hydrateDayPassIdentity, normalizeDayPassStatus } from '../utils/dayPass';
 import { paymentOrderFrom } from '../utils/razorpay';
 import { normalizeRoomBookingStatus } from '../utils/roomBooking';
 import { UPLOAD_TIMEOUT_MS } from '../utils/pickedAttachment';
+import { printerDocumentFileName } from '../utils/printerDocument';
+import { looksLikeInternalIdentifier } from '../utils/displayRecord';
+import { ticketFileDataUri } from '../utils/ticketUpload';
+import { extensionForMimeType } from '../utils/attachmentMime';
+import { leadBillingAddress, leadBillingPayload, leadDocuments } from '../utils/leadData';
+import { eventImageAttachment } from '../utils/eventImage';
+import { mergeImportedRfidCards } from '../utils/rfidCard';
 
 const STORAGE_KEY = '@ofis/community-state/v3';
 const LEGACY_DEMO_SESSION_KEY = '@ofis/community-demo-session/v1';
@@ -70,6 +77,7 @@ type PendingOperation = {
   method: 'POST' | 'PATCH' | 'PUT' | 'DELETE';
   path: string;
   body?: unknown;
+  buildingId?: string;
 };
 
 type AppState = {
@@ -160,6 +168,7 @@ type NewEvent = Omit<EventRecord, 'id' | 'rsvpCount' | 'status' | 'syncState'> &
 type EventPatch = Partial<EventRecord> & EventImages;
 type NewLead = Omit<Lead, 'id' | 'status' | 'createdAt' | 'syncState'> & {
   kycDocument?: FileAttachment;
+  kycDocumentsUpload?: FileAttachment[];
 };
 type NewPost = Omit<
   CommunityPost,
@@ -242,7 +251,11 @@ type AppContextValue = AppState & {
   importRfidCards(
     file: FileAttachment,
     mode?: 'insert' | 'upsert',
-  ): Promise<number>;
+  ): Promise<{
+    createdCount: number;
+    updatedCount: number;
+    unchangedCardUids: string[];
+  }>;
   updateRfidCard(id: string, patch: Partial<RfidCard>): Promise<void>;
   assignRfidCard(id: string, companyId: string, company: string): Promise<void>;
   updatePrinterRequest(
@@ -468,6 +481,35 @@ const appendMultipartFile = (
   } as unknown as Blob);
 };
 
+const ticketFileName = (name: string) => name
+  .replace(/[\\/:*?"<>|]/g, '_')
+  .replace(/^[a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12}-(?:community-ticket-\d+-)?/i, '');
+
+const ticketAttachment = (value: unknown): { name: string; url: string } | null => {
+  const source = value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+  const url = typeof value === 'string'
+    ? value
+    : text(source.url || source.fileUrl || source.path || source.imageUrl);
+  if (!url) return null;
+  if (/^data:[^;,]+;base64,/i.test(url)) {
+    const mimeType = url.slice(5, url.indexOf(';')).toLowerCase();
+    const extension = extensionForMimeType(mimeType);
+    return {
+      name: ticketFileName(text(source.fileName || source.name) || `ticket-attachment.${extension}`),
+      url,
+    };
+  }
+  const encodedName = url.split(/[?#]/)[0].split('/').pop() || 'ticket-attachment';
+  let fileName = encodedName;
+  try { fileName = decodeURIComponent(encodedName); } catch { /* Keep the supplied name. */ }
+  return {
+    name: ticketFileName(text(source.fileName || source.name) || fileName) || 'ticket-attachment',
+    url,
+  };
+};
+
 export const normalizeTicket = (raw: Record<string, unknown>): Ticket => {
   const categoryContainer =
     raw.category && typeof raw.category === 'object'
@@ -510,10 +552,28 @@ export const normalizeTicket = (raw: Record<string, unknown>): Ticket => {
       : typeof raw.file === 'string'
       ? raw.file
       : '';
+  const attachmentName = text(
+    attachmentSource.fileName || attachmentSource.name || raw.attachmentName,
+  );
+  const attachmentCandidates: unknown[] = [
+    raw.attachment,
+    ...(Array.isArray(raw.attachments) ? raw.attachments : []),
+    raw.file,
+    { url: raw.attachmentUrl || raw.fileUrl, name: attachmentName },
+    ...(Array.isArray(raw.images) ? raw.images : []),
+  ];
+  const attachments = attachmentCandidates
+    .map(ticketAttachment)
+    .filter((item): item is { name: string; url: string } => Boolean(item))
+    .filter((item, index, items) => items.findIndex(other => other.url === item.url) === index)
+    .map((item, index) => index === 0 && attachmentName
+      ? { ...item, name: ticketFileName(attachmentName) || 'ticket-attachment' }
+      : item);
 
   return {
     id: text(raw.ticketId || raw._id || raw.id) || makeId('T'),
     backendId: text(raw._id || raw.id) || undefined,
+    buildingId: objectId(raw.buildingId || raw.building) || undefined,
     subject: text(raw.subject || raw.title),
     description: text(raw.description),
     status: (ticketDisplayStatus(raw.status) || 'Open') as Ticket['status'],
@@ -542,18 +602,10 @@ export const normalizeTicket = (raw: Record<string, unknown>): Ticket => {
     createdAt: text(raw.createdAt),
     assignedTo: displayName(raw.assignedTo),
     assignedToId: objectId(raw.assignedTo) || undefined,
-    attachmentName:
-      text(attachmentSource.fileName || attachmentSource.name || raw.attachmentName) ||
+    attachmentName: (attachmentName ? ticketFileName(attachmentName) : '') || attachments[0]?.name ||
       (attachmentString ? attachmentString.split('/').pop() : undefined),
-    attachmentUrl:
-      text(
-        attachmentSource.url ||
-          attachmentSource.fileUrl ||
-          attachmentSource.path ||
-          raw.attachmentUrl ||
-          raw.fileUrl ||
-          attachmentString,
-      ) || undefined,
+    attachmentUrl: attachments[0]?.url,
+    attachments,
     syncState: 'synced',
   };
 };
@@ -620,7 +672,9 @@ const normalizeDayPass = (raw: Record<string, unknown>): DayPass => {
     raw.user ||
     raw.customerId ||
     raw.memberId ||
-    raw.userId;
+    raw.userId ||
+    raw.client ||
+    raw.clientId;
   const customer =
     relatedCustomer && typeof relatedCustomer === 'object'
       ? (relatedCustomer as Record<string, unknown>)
@@ -628,7 +682,8 @@ const normalizeDayPass = (raw: Record<string, unknown>): DayPass => {
   const memberId = objectId(raw.memberId || raw.member) || undefined;
   const customerId =
     objectId(
-      raw.customerId || raw.customer || raw.guest || raw.user || raw.userId,
+      raw.customerId || raw.customer || raw.guest || raw.user || raw.userId ||
+        raw.clientId || raw.client,
     ) || undefined;
   return {
     id: text(raw.bookingId || raw._id || raw.id) || makeId('DP'),
@@ -642,6 +697,7 @@ const normalizeDayPass = (raw: Record<string, unknown>): DayPass => {
           raw.memberName ||
           raw.guestName ||
           raw.userName ||
+          raw.clientName ||
           raw.fullName ||
           raw.name,
       ) || displayName(customer),
@@ -654,7 +710,8 @@ const normalizeDayPass = (raw: Record<string, unknown>): DayPass => {
         customer?.mobile,
     ),
     company:
-      displayName(raw.company || customer?.company) || text(raw.companyName),
+      displayName(raw.company || raw.client || customer?.company) ||
+      text(raw.companyName || raw.clientName),
     date: text(
       raw.bookingDate || raw.visitDate || raw.date || raw.createdAt,
     ).slice(0, 10),
@@ -809,7 +866,12 @@ export const hydrateRoomBookingRelations = (
     };
   });
 
-const normalizeMeetingRoom = (raw: Record<string, unknown>): MeetingRoom => ({
+const normalizeMeetingRoom = (raw: Record<string, unknown>): MeetingRoom => {
+  const pricing =
+    raw.pricing && typeof raw.pricing === 'object'
+      ? (raw.pricing as Record<string, unknown>)
+      : {};
+  return {
   id: text(raw._id || raw.id) || makeId('ROOM'),
   name: text(raw.name || raw.roomName),
   floor: displayName(raw.floor) || text(raw.floorName),
@@ -818,12 +880,22 @@ const normalizeMeetingRoom = (raw: Record<string, unknown>): MeetingRoom => ({
     normalizeStatus(raw.status) === 'unavailable' || raw.isActive === false
       ? 'Unavailable'
       : 'Available',
+  hourlyRate: Number.isFinite(Number(pricing.hourlyRate ?? raw.hourlyRate))
+    ? Number(pricing.hourlyRate ?? raw.hourlyRate)
+    : undefined,
+  creditPricePerHour: Number.isFinite(
+    Number(pricing.creditPricePerHour ?? raw.creditPricePerHour),
+  )
+    ? Number(pricing.creditPricePerHour ?? raw.creditPricePerHour)
+    : undefined,
+  currency: text(pricing.currency || raw.currency) || 'INR',
   communityMaxDiscountPercent: Number.isFinite(
     Number(raw.communityMaxDiscountPercent),
   )
     ? Number(raw.communityMaxDiscountPercent)
     : undefined,
-});
+  };
+};
 
 const normalizeMember = (raw: Record<string, unknown>): Member => {
   const company = raw.company || raw.client;
@@ -958,11 +1030,41 @@ const normalizeCabin = (raw: Record<string, unknown>): Cabin => {
   };
 };
 
-const normalizeEvent = (raw: Record<string, unknown>): EventRecord => {
+export const normalizeEvent = (raw: Record<string, unknown>): EventRecord => {
   const location =
     raw.location && typeof raw.location === 'object'
       ? (raw.location as Record<string, unknown>)
       : undefined;
+  const buildingName =
+    displayName(raw.building) ||
+    displayName(location?.building) ||
+    text(raw.buildingName);
+  const buildingRecord =
+    location?.building && typeof location.building === 'object'
+      ? (location.building as Record<string, unknown>)
+      : undefined;
+  const buildingAddress = text(buildingRecord?.address).trim().toLowerCase();
+  const locationAddress = text(
+    location?.address || raw.venueAddress || raw.location || raw.venue,
+  );
+  const explicitLocationType = text(
+    raw.locationType || location?.type,
+  ).toLowerCase();
+  const isExternal =
+    typeof raw.isExternal === 'boolean'
+      ? raw.isExternal
+      : typeof raw.externalEvent === 'boolean'
+      ? raw.externalEvent
+      : explicitLocationType
+      ? explicitLocationType === 'external'
+      : Boolean(
+          location?.googleMapLink ||
+            (locationAddress &&
+              buildingName &&
+              locationAddress.trim().toLowerCase() !==
+                buildingName.trim().toLowerCase() &&
+              locationAddress.trim().toLowerCase() !== buildingAddress),
+        );
   const speakers = Array.isArray(raw.speakers) ? raw.speakers : [];
   const speaker = speakers[0];
   const normalizedSpeakers = speakers.map(entry => {
@@ -1012,13 +1114,13 @@ const normalizeEvent = (raw: Record<string, unknown>): EventRecord => {
     endTime: timeFromDateTime(
       raw.endTime || raw.endDate || raw.endsAt || raw.endAt,
     ),
-    location: text(location?.address || raw.location || raw.venue),
-    buildingId: objectId(raw.buildingId || raw.building) || undefined,
-    buildingName: displayName(raw.building) || text(raw.buildingName),
-    isExternal: Boolean(
-      raw.isExternal || raw.externalEvent || location?.googleMapLink,
-    ),
-    venueAddress: text(location?.address || raw.venueAddress) || undefined,
+    location: locationAddress,
+    buildingId:
+      objectId(raw.buildingId || raw.building || location?.building) ||
+      undefined,
+    buildingName,
+    isExternal,
+    venueAddress: isExternal ? locationAddress || undefined : undefined,
     googleMapLink:
       text(location?.googleMapLink || raw.googleMapLink) || undefined,
     rsvpClosingDate:
@@ -1076,37 +1178,28 @@ export const mergeEventSelections = (
   rsvpClosingTime: incoming.rsvpClosingTime || base.rsvpClosingTime,
 });
 
-const normalizeLead = (raw: Record<string, unknown>): Lead => ({
+export const normalizeLead = (raw: Record<string, unknown>): Lead => ({
   id: text(raw._id || raw.id) || makeId('L'),
-  name: displayName(raw),
+  name: text(raw.fullName || raw.name) ||
+    [raw.firstName, raw.lastName].map(text).filter(Boolean).join(' ') ||
+    displayName(raw),
   email: text(raw.email),
   phone: text(raw.phone || raw.mobile),
   company: displayName(raw.company || raw.client) || text(raw.companyName),
   purpose: text(raw.purpose || raw.requirement || raw.notes),
+  gender: text(raw.gender) || undefined,
+  gstNo: text(raw.gstNo || raw.gstin || raw.gstNumber) || undefined,
+  gstTreatment: text(raw.gstTreatment) || undefined,
+  placeOfSupply: text(raw.placeOfSupply) || undefined,
+  billingAddress: leadBillingAddress(raw),
+  buildingName: displayName(raw.building) || text(raw.buildingName) || undefined,
+  zohoSyncStatus: text(raw.zohoSyncStatus) || undefined,
   address: text(raw.address || raw.addressLine) || undefined,
   pincode: text(raw.pincode || raw.pinCode || raw.postalCode) || undefined,
   status: (titleCase(raw.status) || 'New') as Lead['status'],
   createdAt: text(raw.createdAt),
   kycStatus: text(raw.kycStatus || raw.kyc_status),
-  kycDocuments: Array.isArray(raw.kycDocuments)
-    ? raw.kycDocuments.map((item, index) => {
-        const document =
-          item && typeof item === 'object'
-            ? (item as Record<string, unknown>)
-            : {};
-        const url =
-          typeof item === 'string'
-            ? item
-            : text(document.url || document.fileUrl || document.path);
-        return {
-          name:
-            text(document.name || document.fileName) ||
-            (url ? url.split('/').pop()?.split('?')[0] : '') ||
-            `Document ${index + 1}`,
-          url: url || undefined,
-        };
-      })
-    : undefined,
+  kycDocuments: raw.kycDocuments ? leadDocuments(raw.kycDocuments) : undefined,
   syncState: 'synced',
 });
 
@@ -1123,7 +1216,7 @@ const normalizeRfidCard = (raw: Record<string, unknown>): RfidCard => ({
   syncState: 'synced',
 });
 
-const normalizePrinter = (raw: Record<string, unknown>): PrinterRequest => {
+export const normalizePrinter = (raw: Record<string, unknown>): PrinterRequest => {
   const file =
     raw.file && typeof raw.file === 'object'
       ? (raw.file as Record<string, unknown>)
@@ -1131,11 +1224,12 @@ const normalizePrinter = (raw: Record<string, unknown>): PrinterRequest => {
   const printType = text(raw.printType || raw.print_type).toLowerCase();
   const paperSize = text(raw.paperSize || raw.paper_size);
   const sides = text(raw.sides).toLowerCase();
+  const company = displayName(raw.client || raw.company);
   return {
     id: text(raw._id || raw.id) || makeId('PR'),
     fileName: text(raw.fileName || raw.documentName || file.name || raw.name),
     requestedBy: displayName(raw.requester || raw.user || raw.requestedBy),
-    company: displayName(raw.client || raw.company),
+    company: looksLikeInternalIdentifier(company) ? '' : company,
     clientId: objectId(raw.clientId || raw.client) || undefined,
     memberId: objectId(raw.memberId || raw.member) || undefined,
     copies: Number(raw.copies || 1),
@@ -1203,6 +1297,7 @@ const toTicketPayload = (input: Partial<Ticket>, buildingId?: string) => ({
     ? { status: ticketApiStatus(input.status) }
     : {}),
   ...(buildingId ? { building: buildingId } : {}),
+  ...(input.createdById ? { createdBy: input.createdById } : {}),
   ...(input.clientId ? { clientId: input.clientId } : {}),
   ...(input.assignedToId || input.assignedTo
     ? { assignedTo: input.assignedToId || input.assignedTo }
@@ -1234,6 +1329,9 @@ const normalizeSessionUser = (
   const assignedBuildings = Array.isArray(rawUser.buildings)
     ? rawUser.buildings
     : [];
+  const assignedBuildingIds = Array.isArray(rawUser.buildingIds)
+    ? rawUser.buildingIds
+    : assignedBuildings;
   const rawBuilding =
     rawUser.building ||
     source.building ||
@@ -1265,6 +1363,9 @@ const normalizeSessionUser = (
       displayName(building) ||
       fallback?.buildingName ||
       '',
+    buildingIds: assignedBuildingIds.length
+      ? [...new Set(assignedBuildingIds.map(objectId).filter(Boolean))]
+      : fallback?.buildingIds,
   };
 };
 
@@ -1542,8 +1643,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           | 'patch'
           | 'put'
           | 'delete';
-        if (method === 'delete') await apiClient.delete(operation.path);
-        else await apiClient[method](operation.path, operation.body);
+        const config = operation.buildingId
+          ? { headers: { 'X-Ofis-Building-Ids': operation.buildingId } }
+          : undefined;
+        if (method === 'delete')
+          await apiClient.delete(operation.path, config);
+        else
+          await apiClient[method](operation.path, operation.body, config);
         setState(current => ({
           ...current,
           connection: 'online',
@@ -1643,8 +1749,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             | 'patch'
             | 'put'
             | 'delete';
-          if (method === 'delete') await apiClient.delete(operation.path);
-          else await apiClient[method](operation.path, operation.body);
+          const config = operation.buildingId
+            ? { headers: { 'X-Ofis-Building-Ids': operation.buildingId } }
+            : undefined;
+          if (method === 'delete')
+            await apiClient.delete(operation.path, config);
+          else
+            await apiClient[method](operation.path, operation.body, config);
         } catch {
           remainingOperations.push(operation);
         }
@@ -1705,6 +1816,51 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           : extractList<Record<string, unknown>>(tickets, ['tickets']).map(
               normalizeTicket,
             );
+      // Ticket list responses can omit createdBy even when ticket detail has it.
+      // Enrich missing creators once; cached records avoid repeating detail calls
+      // on subsequent refreshes. Keep the batch small to avoid flooding the API.
+      const ticketCreatorDetails = new Map<string, Ticket>();
+      const ticketsNeedingCreator = (nextTickets ?? []).filter(ticket => {
+        const cached = stateRef.current.tickets.find(
+          item => item.backendId === ticket.backendId,
+        );
+        return Boolean(
+          !ticket.memberName &&
+            !ticket.createdById &&
+            !cached?.memberName &&
+            !cached?.createdById &&
+            ticket.backendId,
+        );
+      });
+      for (
+        let offset = 0;
+        offset < Math.min(ticketsNeedingCreator.length, 30);
+        offset += 5
+      ) {
+        const batch = ticketsNeedingCreator.slice(offset, offset + 5);
+        const results = await Promise.allSettled(
+          batch.map(ticket =>
+            apiClient.get<Record<string, unknown>>(
+              Routes.ticket(ticket.backendId!),
+              undefined,
+              ticket.buildingId
+                ? { headers: { 'X-Ofis-Building-Ids': ticket.buildingId } }
+                : undefined,
+            ),
+          ),
+        );
+        results.forEach((result, index) => {
+          if (result.status !== 'fulfilled') return;
+          const data = unwrapData(result.value);
+          const raw =
+            data.ticket && typeof data.ticket === 'object'
+              ? (data.ticket as Record<string, unknown>)
+              : data;
+          const detail = normalizeTicket(raw);
+          if (detail.createdById || detail.memberName)
+            ticketCreatorDetails.set(batch[index].backendId!, detail);
+        });
+      }
       const nextVisitors =
         visitors === null
           ? null
@@ -1725,19 +1881,24 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
               'bookings',
             ]).map(normalizeDayPass);
       const passCustomers = nextOnDemandUsers ?? stateRef.current.onDemandUsers;
+      const passMembers =
+        members === null
+          ? stateRef.current.members
+          : extractList<Record<string, unknown>>(members, ['members']).map(
+              normalizeMember,
+            );
+      const passCompanies =
+        companies === null
+          ? stateRef.current.companies
+          : extractList<Record<string, unknown>>(companies, ['clients']).map(
+              normalizeCompany,
+            );
       const hydratedPasses = nextPasses?.map(pass => {
-        const customer = pass.customerId
-          ? passCustomers.find(item => item.id === pass.customerId)
-          : undefined;
-        return customer
-          ? {
-              ...pass,
-              name: pass.name || customer.name,
-              email: pass.email || customer.email,
-              phone: pass.phone || customer.phone,
-              company: pass.company || customer.company,
-            }
-          : pass;
+        return hydrateDayPassIdentity(pass, {
+          onDemandUsers: passCustomers,
+          members: passMembers,
+          companies: passCompanies,
+        });
       });
       const nextBookings =
         bookings === null
@@ -1752,18 +1913,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
               'meetingRooms',
               'rooms',
             ]).map(normalizeMeetingRoom);
-      const nextCompanies =
-        companies === null
-          ? null
-          : extractList<Record<string, unknown>>(companies, ['clients']).map(
-              normalizeCompany,
-            );
-      const nextMembers =
-        members === null
-          ? null
-          : extractList<Record<string, unknown>>(members, ['members']).map(
-              normalizeMember,
-            );
+      const nextCompanies = companies === null ? null : passCompanies;
+      const nextMembers = members === null ? null : passMembers;
       const hydratedMembers = nextMembers
         ? resolveMemberCompanyNames(
             nextMembers,
@@ -1787,18 +1938,27 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             item.id === ticket.id ||
             (item.backendId && item.backendId === ticket.backendId),
         );
+        const creatorDetail = ticket.backendId
+          ? ticketCreatorDetails.get(ticket.backendId)
+          : undefined;
+        const createdById =
+          ticket.createdById ||
+          creatorDetail?.createdById ||
+          previous?.createdById;
         const creator = (hydratedMembers ?? stateRef.current.members).find(
-          item => item.id === ticket.createdById,
+          item => item.id === createdById,
         );
         const company = (nextCompanies ?? stateRef.current.companies).find(
           item => item.id === ticket.clientId,
         );
         return {
           ...ticket,
+          createdById,
           memberName:
             ticket.memberName ||
+            creatorDetail?.memberName ||
             creator?.name ||
-            (ticket.createdById === stateRef.current.user?.id
+            (createdById === stateRef.current.user?.id
               ? stateRef.current.user?.name
               : '') ||
             previous?.memberName ||
@@ -1809,6 +1969,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           attachmentName:
             ticket.attachmentName || previous?.attachmentName,
           attachmentUrl: ticket.attachmentUrl || previous?.attachmentUrl,
+          attachments: ticket.attachments?.length
+            ? ticket.attachments
+            : previous?.attachments,
         };
       });
       setState(current => ({
@@ -1928,25 +2091,23 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const createTicket = useCallback(
     async (input: NewTicket) => {
       const buildingId = stateRef.current.user?.buildingId;
+      const creatorId = stateRef.current.user?.id;
       if (!buildingId)
         throw new Error('Your account does not have a selected building.');
       const { attachment, ...ticketInput } = input;
-      const body = toTicketPayload(ticketInput, buildingId);
+      const body = toTicketPayload(
+        { ...ticketInput, createdById: creatorId },
+        buildingId,
+      );
       try {
-        const requestBody: Record<string, unknown> | FormData = attachment
-          ? (() => {
-              const form = new FormData();
-              appendMultipartFields(form, body);
-              appendMultipartFile(form, 'attachment', attachment);
-              return form;
-            })()
+        const requestBody = attachment
+          ? { ...body, images: [await ticketFileDataUri(attachment)] }
           : body;
         const response = await apiClient.post<Record<string, unknown>>(
           Routes.community.tickets,
           requestBody,
           attachment
             ? {
-                headers: { 'Content-Type': 'multipart/form-data' },
                 timeout: UPLOAD_TIMEOUT_MS,
               }
             : undefined,
@@ -1957,13 +2118,36 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             ? (data.ticket as Record<string, unknown>)
             : data;
         const normalized = normalizeTicket(raw);
+        // The create endpoint currently ignores createdBy, while PATCH persists it.
+        // Confirm the saved value before showing the signed-in user's name.
+        if (!normalized.createdById && normalized.backendId && creatorId) {
+          try {
+            const updated = await apiClient.patch<Record<string, unknown>>(
+              Routes.ticket(normalized.backendId),
+              { createdBy: creatorId },
+            );
+            const updatedData = unwrapData(updated);
+            const updatedRaw =
+              updatedData.ticket && typeof updatedData.ticket === 'object'
+                ? (updatedData.ticket as Record<string, unknown>)
+                : updatedData;
+            const savedCreatorId = objectId(updatedRaw.createdBy);
+            if (savedCreatorId === creatorId)
+              normalized.createdById = savedCreatorId;
+          } catch {
+            // Ticket creation succeeded; do not turn an attribution failure into
+            // a misleading "creation failed" error that invites a duplicate.
+          }
+        }
         const record: Ticket = {
           ...ticketInput,
           ...normalized,
+          buildingId: normalized.buildingId || buildingId,
           memberName:
             normalized.memberName ||
-            ticketInput.memberName ||
-            stateRef.current.user?.name ||
+            (normalized.createdById === creatorId
+              ? stateRef.current.user?.name
+              : '') ||
             '',
           company: normalized.company || ticketInput.company,
           clientId: normalized.clientId || ticketInput.clientId,
@@ -2017,6 +2201,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       );
       if (!building || !stateRef.current.user)
         throw new Error('That building is not available for this account.');
+      if (
+        stateRef.current.user.buildingIds?.length &&
+        !stateRef.current.user.buildingIds.includes(buildingId)
+      )
+        throw new Error('This building is not assigned to your account.');
       const nextUser = {
         ...stateRef.current.user,
         buildingId: building.id,
@@ -2051,6 +2240,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           method: 'PATCH',
           path: Routes.ticket(backendId),
           body: toTicketPayload(patch),
+          buildingId: previous.buildingId,
         });
         if (synced)
           setState(current => ({
@@ -2087,6 +2277,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         await performMutation({
           method: 'DELETE',
           path: Routes.ticket(ticket.backendId || id),
+          buildingId: ticket.buildingId,
         });
       } catch (error) {
         setState(current => ({ ...current, tickets: previousTickets }));
@@ -2608,6 +2799,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         'Event description, category, start/end time, and building are required.',
       );
     }
+    if (buildingId !== stateRef.current.user?.buildingId)
+      throw new Error('The selected building changed. Choose it again before uploading.');
+    if (
+      stateRef.current.user.buildingIds?.length &&
+      !stateRef.current.user.buildingIds.includes(buildingId)
+    ) throw new Error('This building is not assigned to your account.');
     const draft: EventRecord = {
       ...fields,
       coverImage: coverImageFile?.uri || fields.coverImage,
@@ -2644,11 +2841,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         : '',
       speakers: fields.speakers || [],
     });
-    if (coverImageFile) appendMultipartFile(form, 'thumbnail', coverImageFile);
+    if (coverImageFile)
+      appendMultipartFile(form, 'thumbnail', eventImageAttachment(coverImageFile));
     if (additionalImageFile)
-      appendMultipartFile(form, 'mainImage', additionalImageFile);
+      appendMultipartFile(form, 'mainImage', eventImageAttachment(additionalImageFile));
     speakerImageFiles?.forEach(file =>
-      appendMultipartFile(form, 'speakerImages', file),
+      appendMultipartFile(form, 'speakerImages', eventImageAttachment(file)),
     );
     if (fields.speakerImageIndexes?.length) {
       form.append('speakerImageIndexes', JSON.stringify(fields.speakerImageIndexes));
@@ -2656,7 +2854,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const response = await apiClient.post<Record<string, unknown>>(
       Routes.community.events,
       form,
-      { headers: { 'Content-Type': 'multipart/form-data' } },
+      {
+        headers: {
+          'X-Ofis-Building-Ids': buildingId,
+          'Content-Type': 'multipart/form-data',
+        },
+        timeout: UPLOAD_TIMEOUT_MS,
+      },
     );
     const data =
       response.data && typeof response.data === 'object'
@@ -2710,6 +2914,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       !merged.endTime
     )
       throw new Error('The event is missing required details.');
+    if (buildingId !== stateRef.current.user?.buildingId)
+      throw new Error('The selected building changed. Choose it again before uploading.');
+    if (
+      stateRef.current.user?.buildingIds?.length &&
+      !stateRef.current.user.buildingIds.includes(buildingId)
+    ) throw new Error('This building is not assigned to your account.');
     const form = new FormData();
     appendMultipartFields(form, {
       title: merged.title,
@@ -2739,11 +2949,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         : '',
       speakers: merged.speakers || [],
     });
-    if (coverImageFile) appendMultipartFile(form, 'thumbnail', coverImageFile);
+    if (coverImageFile)
+      appendMultipartFile(form, 'thumbnail', eventImageAttachment(coverImageFile));
     if (additionalImageFile)
-      appendMultipartFile(form, 'mainImage', additionalImageFile);
+      appendMultipartFile(form, 'mainImage', eventImageAttachment(additionalImageFile));
     speakerImageFiles?.forEach(file =>
-      appendMultipartFile(form, 'speakerImages', file),
+      appendMultipartFile(form, 'speakerImages', eventImageAttachment(file)),
     );
     if (fields.speakerImageIndexes?.length) {
       form.append('speakerImageIndexes', JSON.stringify(fields.speakerImageIndexes));
@@ -2751,7 +2962,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const response = await apiClient.put<Record<string, unknown>>(
       Routes.event(id),
       form,
-      { headers: { 'Content-Type': 'multipart/form-data' } },
+      {
+        headers: {
+          'X-Ofis-Building-Ids': buildingId,
+          'Content-Type': 'multipart/form-data',
+        },
+        timeout: UPLOAD_TIMEOUT_MS,
+      },
     );
     const data =
       response.data && typeof response.data === 'object'
@@ -2892,7 +3109,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const buildingId = stateRef.current.user?.buildingId;
     if (!buildingId)
       throw new Error('Select a building before creating a lead.');
-    const { kycDocument, ...leadInput } = input;
+    const { kycDocument, kycDocumentsUpload, ...leadInput } = input;
+    const documents = kycDocumentsUpload?.length
+      ? kycDocumentsUpload
+      : kycDocument ? [kycDocument] : [];
     const nameParts = leadInput.name.trim().split(/\s+/).filter(Boolean);
     const firstName = nameParts.shift() || '';
     const lastName = nameParts.join(' ');
@@ -2900,10 +3120,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       !firstName ||
       !lastName ||
       !leadInput.email.trim() ||
-      normalizeIndianPhone(leadInput.phone).length !== 10
+      normalizeIndianPhone(leadInput.phone).length !== 10 ||
+      !leadInput.gender
     ) {
       throw new Error(
-        'First name, last name, email, and a valid 10-digit phone number are required.',
+        'First name, last name, email, a valid 10-digit phone number, and gender are required.',
       );
     }
     const form = new FormData();
@@ -2914,17 +3135,28 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       email: leadInput.email.trim(),
       phone: normalizeIndianPhone(leadInput.phone),
       company: leadInput.company.trim(),
+      companyName: leadInput.company.trim(),
+      gender: leadInput.gender,
+      gstNo: leadInput.gstNo?.trim(),
+      gstTreatment: leadInput.gstTreatment,
+      placeOfSupply: leadInput.placeOfSupply,
+      billingAddress: leadBillingPayload(leadInput.billingAddress),
       address: leadInput.address?.trim(),
       pincode: leadInput.pincode?.trim(),
       purpose: 'day_pass',
       buildingId,
     });
-    if (kycDocument)
-      appendMultipartFile(form, 'kycDocuments', kycDocument);
+    documents.forEach(document => appendMultipartFile(form, 'kycDocuments', document));
     const response = await apiClient.post<Record<string, unknown>>(
       Routes.community.leads,
       form,
-      { headers: { 'Content-Type': 'multipart/form-data' } },
+      {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+          'X-Ofis-Building-Ids': buildingId,
+        },
+        timeout: UPLOAD_TIMEOUT_MS,
+      },
     );
     const data =
       response.data && typeof response.data === 'object'
@@ -2941,13 +3173,20 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       email: normalized.email || leadInput.email,
       phone: normalized.phone || leadInput.phone,
       company: normalized.company || leadInput.company,
+      gender: normalized.gender || leadInput.gender,
+      gstNo: normalized.gstNo || leadInput.gstNo,
+      gstTreatment: normalized.gstTreatment || leadInput.gstTreatment,
+      placeOfSupply: normalized.placeOfSupply || leadInput.placeOfSupply,
+      billingAddress: normalized.billingAddress?.address || normalized.billingAddress?.city
+        ? normalized.billingAddress
+        : leadInput.billingAddress,
       address: normalized.address || leadInput.address,
       pincode: normalized.pincode || leadInput.pincode,
       kycStatus:
-        normalized.kycStatus || (kycDocument ? 'Pending Review' : undefined),
+        normalized.kycStatus || (documents.length ? 'Pending Review' : undefined),
       kycDocuments:
         normalized.kycDocuments ||
-        (kycDocument ? [{ name: kycDocument.name }] : undefined),
+        (documents.length ? documents.map(document => ({ name: document.name })) : undefined),
     };
     setState(current => ({
       ...current,
@@ -3020,32 +3259,70 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       };
       const preview = await upload(true);
       const previewData = unwrapData(preview);
+      const previewResults = Array.isArray(previewData.results)
+        ? (previewData.results as Record<string, unknown>[])
+        : [];
+      const submittedUids = previewResults
+        .map(result => {
+          const row =
+            result.data && typeof result.data === 'object'
+              ? (result.data as Record<string, unknown>)
+              : result.row && typeof result.row === 'object'
+              ? (result.row as Record<string, unknown>)
+              : result;
+          return text(row.cardUid || row.uid).trim();
+        })
+        .filter(Boolean);
       const previewErrors = Array.isArray(previewData.errors)
         ? previewData.errors
         : [];
-      if (previewErrors.length)
+      const previewCounts =
+        previewData.counts && typeof previewData.counts === 'object'
+          ? (previewData.counts as Record<string, unknown>)
+          : {};
+      const invalidRows = Number(previewCounts.invalid || 0);
+      if (previewErrors.length || invalidRows > 0)
         throw new Error(
-          `Import validation failed: ${previewErrors
-            .map(text)
-            .filter(Boolean)
-            .join(', ')}`,
+          previewErrors.length
+            ? `Import validation failed: ${previewErrors
+                .map(text)
+                .filter(Boolean)
+                .join(', ')}`
+            : `Import validation failed for ${invalidRows} ${invalidRows === 1 ? 'row' : 'rows'}.`,
         );
       const response = await upload(false);
-      const responseData =
-        response.data && typeof response.data === 'object'
-          ? (response.data as Record<string, unknown>)
-          : response;
       const responseCards = extractList<Record<string, unknown>>(response, [
         'cards',
         'rfidCards',
       ]);
+      const baselineCards = stateRef.current.rfidCards;
       let refreshedPayload = responseCards;
-      if (!refreshedPayload.length) {
+      // The import endpoint commits before its paginated list is always
+      // immediately consistent. Refresh the same scoped page used by syncAll,
+      // with short retries, so newly imported cards appear as soon as the
+      // import sheet closes instead of requiring an app restart.
+      for (let attempt = 0; attempt < 4; attempt += 1) {
+        if (attempt > 0)
+          await new Promise<void>(resolve =>
+            setTimeout(() => resolve(), attempt * 400),
+          );
         try {
-          refreshedPayload = extractList<Record<string, unknown>>(
-            await apiClient.get(Routes.community.rfidCards),
+          const listedCards = extractList<Record<string, unknown>>(
+            await apiClient.get(Routes.community.rfidCards, {
+              page: 1,
+              limit: 100,
+              buildingId,
+            }),
             ['cards', 'rfidCards'],
           );
+          if (listedCards.length) refreshedPayload = listedCards;
+          const knownKeys = new Set(
+            baselineCards.map(card => `${card.id}|${card.uid}`.toLowerCase()),
+          );
+          const hasNewCard = listedCards
+            .map(normalizeRfidCard)
+            .some(card => !knownKeys.has(`${card.id}|${card.uid}`.toLowerCase()));
+          if (hasNewCard) break;
         } catch {
           /* The import may still have succeeded even if the refresh endpoint is temporarily unavailable. */
         }
@@ -3053,15 +3330,43 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const imported = refreshedPayload.map(normalizeRfidCard);
       setState(current => ({
         ...current,
-        rfidCards: imported.length ? imported : current.rfidCards,
+        rfidCards: imported.length
+          ? mergeImportedRfidCards(current.rfidCards, imported)
+          : current.rfidCards,
       }));
-      return Number(
-        responseData.importedCount ||
-          responseData.count ||
-          response.importedCount ||
-          response.count ||
-          responseCards.length,
+      const beforeByUid = new Map(
+        baselineCards
+          .filter(card => card.uid.trim())
+          .map(card => [card.uid.trim().toLowerCase(), card]),
       );
+      const afterByUid = new Map(
+        imported
+          .filter(card => card.uid.trim())
+          .map(card => [card.uid.trim().toLowerCase(), card]),
+      );
+      const createdCount = [...afterByUid.keys()].filter(
+        uid => !beforeByUid.has(uid),
+      ).length;
+      const changed = (before: RfidCard, after: RfidCard) =>
+        before.status !== after.status ||
+        before.billingType !== after.billingType ||
+        before.companyId !== after.companyId ||
+        before.assignedTo !== after.assignedTo ||
+        before.accessAreas.join('|') !== after.accessAreas.join('|');
+      const uniqueSubmittedUids = [...new Set(submittedUids.map(uid => uid.toLowerCase()))];
+      const updatedUids = uniqueSubmittedUids.filter(uid => {
+        const before = beforeByUid.get(uid);
+        const after = afterByUid.get(uid);
+        return Boolean(before && after && changed(before, after));
+      });
+      const unchangedCardUids = uniqueSubmittedUids
+        .filter(uid => beforeByUid.has(uid) && !updatedUids.includes(uid))
+        .map(uid => beforeByUid.get(uid)?.uid || uid);
+      return {
+        createdCount,
+        updatedCount: updatedUids.length,
+        unchangedCardUids,
+      };
     },
     [],
   );
@@ -3174,6 +3479,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       throw new Error('Choose the client requesting the print.');
     if (!input.buildingId)
       throw new Error('Select a building before creating a print request.');
+    if (input.buildingId !== stateRef.current.user?.buildingId)
+      throw new Error('The selected building changed. Choose it again before uploading.');
+    if (
+      stateRef.current.user.buildingIds?.length &&
+      !stateRef.current.user.buildingIds.includes(input.buildingId)
+    )
+      throw new Error('This building is not assigned to your account.');
     if (
       !Number.isInteger(input.copies) ||
       input.copies < 1 ||
@@ -3183,13 +3495,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (input.attachment.size && input.attachment.size > 10 * 1024 * 1024)
       throw new Error('The document must be 10 MB or smaller.');
 
+    const fileName = printerDocumentFileName(input.attachment, input.fileName);
     const form = new FormData();
-    appendMultipartFile(form, 'document', input.attachment);
+    appendMultipartFile(form, 'document', {
+      ...input.attachment,
+      name: fileName,
+    });
     appendMultipartFields(form, {
       clientId: input.clientId,
       memberId: input.memberId || undefined,
       buildingId: input.buildingId,
-      fileName: input.fileName?.trim() || input.attachment.name,
+      fileName,
       copies: input.copies,
       printType: input.printType,
       paperSize: input.paperSize,
@@ -3200,7 +3516,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       Routes.community.printerRequests,
       form,
       {
-        headers: { 'Content-Type': 'multipart/form-data' },
+        headers: {
+          'X-Ofis-Building-Ids': input.buildingId,
+          'Content-Type': 'multipart/form-data',
+        },
         timeout: UPLOAD_TIMEOUT_MS,
       },
     );
@@ -3212,7 +3531,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const created = normalizePrinter(raw);
     const completed: PrinterRequest = {
       ...created,
-      fileName: created.fileName || input.fileName || input.attachment.name,
+      fileName: created.fileName || fileName,
       requestedBy: created.requestedBy || input.requestedBy || '',
       company: created.company || input.company || '',
       clientId: created.clientId || input.clientId,

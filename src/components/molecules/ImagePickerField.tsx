@@ -4,6 +4,7 @@ import { errorCodes, isErrorWithCode, pick, types } from '@react-native-document
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { BorderRadius, Colors, Spacing, Typography } from '../../theme';
 import { FileAttachment } from '../../types/domain';
+import { pickedAttachment } from '../../utils/pickedAttachment';
 
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 
@@ -14,12 +15,11 @@ export async function selectImageAttachment(): Promise<FileAttachment | null> {
       Alert.alert('Image too large', 'Choose an image smaller than 10 MB.');
       return null;
     }
-    return {
-      uri: image.uri,
+    return await pickedAttachment({
+      ...image,
       name: image.name || `image-${Date.now()}.jpg`,
       type: image.type || 'image/jpeg',
-      size: image.size || undefined,
-    };
+    });
   } catch (error) {
     if (isErrorWithCode(error) && error.code === errorCodes.OPERATION_CANCELED) return null;
     throw error;

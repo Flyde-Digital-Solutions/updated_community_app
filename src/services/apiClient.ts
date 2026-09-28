@@ -1,5 +1,6 @@
 import axios, { AxiosError, AxiosRequestConfig } from 'axios';
 import { Environment } from '../config/environment';
+import { Routes } from './routes';
 
 export class ApiError extends Error {
   readonly status?: number;
@@ -35,13 +36,55 @@ const client = axios.create({
   headers: { Accept: 'application/json' },
 });
 
+const multipartRequestLabel = (config: AxiosRequestConfig | undefined) => {
+  const method = config?.method?.toUpperCase();
+  if (method === 'POST' && config?.url === Routes.community.printerRequests)
+    return 'Printer POST';
+  if (
+    (method === 'POST' && config?.url === Routes.community.events) ||
+    (method === 'PUT' && String(config?.url || '').startsWith(`${Routes.community.events}/`))
+  ) return `Event ${method}`;
+  return '';
+};
+
+const logMultipartRequest = (
+  config: AxiosRequestConfig | undefined,
+  status: number | undefined,
+  contentType: unknown,
+  body?: unknown,
+) => {
+  const label = multipartRequestLabel(config);
+  if (
+    typeof __DEV__ === 'undefined' || !__DEV__ ||
+    !label
+  ) return;
+  const url = client.getUri(config);
+  const errorText = typeof body === 'string'
+    ? body.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim()
+    : body && typeof body === 'object'
+      ? String((body as Record<string, unknown>).error || (body as Record<string, unknown>).message || '')
+      : '';
+  console.info(
+    `[${label}] ${url} | HTTP ${status ?? 'network error'} | content-type: ${String(contentType || 'unavailable')}` +
+    (errorText ? ` | response: ${errorText.slice(0, 200)}` : ''),
+  );
+};
+
 client.interceptors.request.use(config => {
   if (session.token) config.headers.Authorization = `Bearer ${session.token}`;
   const requestPath = String(config.url || '');
   const usesBuildingScope = requestPath.startsWith('/api/community/') || requestPath.startsWith('/api/extended-hours/');
+  // The ticket-list endpoint returns tickets for every building assigned to the
+  // authenticated community user when the building header is omitted. Keep
+  // mutations and ticket-detail requests scoped to the selected building, but
+  // let the list mirror the documented curl/response used by the Tickets screen.
+  const isAllBuildingsTicketList =
+    String(config.method || 'get').toLowerCase() === 'get' &&
+    requestPath === Routes.community.tickets;
   if (
     session.buildingId &&
     usesBuildingScope &&
+    !isAllBuildingsTicketList &&
     !config.headers['X-Ofis-Building-Ids']
   ) {
     config.headers['X-Ofis-Building-Ids'] = session.buildingId;
@@ -50,9 +93,19 @@ client.interceptors.request.use(config => {
 });
 
 client.interceptors.response.use(
-  response => response,
+  response => {
+    logMultipartRequest(response.config, response.status, response.headers['content-type']);
+    return response;
+  },
   error => {
-    if ((error as AxiosError).response?.status === 401) unauthorizedHandler?.();
+    const axiosError = error as AxiosError;
+    logMultipartRequest(
+      axiosError.config,
+      axiosError.response?.status,
+      axiosError.response?.headers['content-type'],
+      axiosError.response?.data,
+    );
+    if (axiosError.response?.status === 401) unauthorizedHandler?.();
     return Promise.reject(error);
   },
 );
@@ -80,7 +133,7 @@ export const apiClient = {
   get: <T>(url: string, params?: Record<string, unknown>, config?: AxiosRequestConfig) =>
     request<T>({ ...config, method: 'GET', url, params }),
   post: <T>(url: string, data?: unknown, config?: AxiosRequestConfig) => request<T>({ ...config, method: 'POST', url, data }),
-  patch: <T>(url: string, data?: unknown) => request<T>({ method: 'PATCH', url, data }),
+  patch: <T>(url: string, data?: unknown, config?: AxiosRequestConfig) => request<T>({ ...config, method: 'PATCH', url, data }),
   put: <T>(url: string, data?: unknown, config?: AxiosRequestConfig) => request<T>({ ...config, method: 'PUT', url, data }),
-  delete: <T>(url: string) => request<T>({ method: 'DELETE', url }),
+  delete: <T>(url: string, config?: AxiosRequestConfig) => request<T>({ ...config, method: 'DELETE', url }),
 };

@@ -78,6 +78,7 @@ export function LoginScreen() {
             <Text style={styles.subtitle}>Sign in to manage your OSPLCommunity account.</Text>
             <InputField
               label="Mobile number"
+              required
               value={phone}
               onChangeText={value => setPhone(value.replace(/\D/g, '').slice(0, 10))}
               placeholder="10-digit mobile number"
@@ -85,7 +86,7 @@ export function LoginScreen() {
               maxLength={10}
               leftIcon={<Text style={styles.prefix}>+91</Text>}
             />
-            <OrangeButton label="Send verification code" onPress={handleSendOtp} loading={loading} disabled={!valid} />
+            <OrangeButton label="Send verification code" onPress={handleSendOtp} loading={loading} disabled={!valid} onDisabledPress={() => Alert.alert('Mandatory fields missing', 'Enter a 10-digit mobile number.')} />
             <TouchableOpacity disabled={openingSignup} onPress={handleCreateAccount} style={styles.linkButton}>
               <Text style={styles.linkText}>{openingSignup ? 'Requesting Ticket...' : 'Request Ticket'}</Text>
             </TouchableOpacity>

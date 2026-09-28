@@ -15,9 +15,9 @@ jest.mock('react-native-razorpay', () => ({
 jest.mock('react-native-blob-util', () => ({
   __esModule: true,
   default: {
-    fs: { dirs: { DocumentDir: '/tmp' }, unlink: jest.fn().mockResolvedValue(undefined) },
+    fs: { dirs: { DocumentDir: '/tmp', DownloadDir: '/downloads' }, exists: jest.fn().mockResolvedValue(false), ls: jest.fn().mockResolvedValue([]), unlink: jest.fn().mockResolvedValue(undefined), readFile: jest.fn().mockResolvedValue('cGRm'), writeFile: jest.fn().mockResolvedValue(undefined) },
     config: jest.fn(() => ({ fetch: jest.fn().mockResolvedValue({ path: () => '/tmp/export.csv', info: () => ({ status: 200, headers: {} }) }) })),
-    android: { actionViewIntent: jest.fn().mockResolvedValue(undefined) },
+    android: { actionViewIntent: jest.fn().mockResolvedValue(undefined), addCompleteDownload: jest.fn().mockResolvedValue(undefined) },
     ios: { openDocument: jest.fn().mockResolvedValue(undefined) },
   },
 }));

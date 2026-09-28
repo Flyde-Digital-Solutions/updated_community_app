@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import {
+  Alert,
   View,
   Text,
   StyleSheet,
@@ -17,9 +18,14 @@ import {
 import { Colors, Typography, Spacing, BorderRadius } from '../../theme';
 import { RootStackParamList } from '../../navigation/MainStackNavigator';
 import { useApp } from '../../context/AppContext';
+import { apiClient } from '../../services/apiClient';
+import { Routes } from '../../services/routes';
+import { paymentOrderFrom } from '../../utils/razorpay';
 import {
+  canPayRoomBooking,
   normalizeRoomBookingStatus,
   resolveRoomBookingProfileTarget,
+  roomBookingCompanyName,
   type RoomBookingProfileTarget,
 } from '../../utils/roomBooking';
 import { formatTimeRange } from '../../utils/timeRange';
@@ -48,6 +54,7 @@ interface RoomBooking {
   startTime: string;
   endTime: string;
   status: BookingStatus;
+  paymentMethod?: 'credits' | 'razorpay';
   attendees: number;
 }
 
@@ -84,10 +91,14 @@ function BookingCard({
   booking,
   onViewProfile,
   onViewDetails,
+  onPay,
+  paying,
 }: {
   booking: RoomBooking;
   onViewProfile: () => void;
   onViewDetails: () => void;
+  onPay: () => void;
+  paying: boolean;
 }) {
   const statusCfg = STATUS_CONFIG[booking.status] ?? STATUS_CONFIG.Pending;
   const floorColor = FLOOR_COLORS[booking.floor] ?? Colors.textSecondary;
@@ -199,6 +210,18 @@ function BookingCard({
         <Text style={styles.detailsButtonText}>Manage visitors & access</Text>
         <Icon name="chevron-right" size={16} color={Colors.accent300} />
       </TouchableOpacity>
+      {canPayRoomBooking(booking) ? (
+        <TouchableOpacity
+          accessibilityRole="button"
+          accessibilityLabel={`Pay for ${booking.roomName} booking`}
+          disabled={paying}
+          onPress={onPay}
+          style={[styles.payButton, paying && styles.payButtonDisabled]}
+        >
+          <Icon name="credit-card-outline" size={18} color={Colors.white} />
+          <Text style={styles.payButtonText}>{paying ? 'Preparing payment…' : 'Pay now'}</Text>
+        </TouchableOpacity>
+      ) : null}
     </View>
   );
 }
@@ -207,6 +230,56 @@ export function AllRoomBookingsScreen() {
   const navigation = useNavigation<Nav>();
   const insets = useSafeAreaInsets();
   const { bookings, members, onDemandUsers, companies } = useApp();
+  const [payingId, setPayingId] = useState<string | null>(null);
+  const payBooking = async (booking: RoomBooking) => {
+    if (!canPayRoomBooking(booking) || payingId) return;
+    setPayingId(booking.id);
+    try {
+      const response = await apiClient.post<Record<string, unknown>>(
+        Routes.razorpayCreateOrder,
+        {
+          meetingBookingId: booking.id,
+          ...(booking.clientId ? { clientId: booking.clientId } : {}),
+        },
+      );
+      const order = paymentOrderFrom(response);
+      if (order?.noPaymentRequired) {
+        Alert.alert('No payment required', 'This booking does not have an amount to pay. Refresh the booking to see its latest status.');
+        return;
+      }
+      if (!order) throw new Error('The payment service did not return a valid order and amount. Please try again.');
+      const payable = (order.amount / 100).toLocaleString('en-IN', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      });
+      const member = members.find(item => item.id === booking.memberId);
+      const guest = onDemandUsers.find(item => item.id === booking.guestId);
+      Alert.alert(
+        'Confirm meeting-room payment',
+        `Amount payable: ₹${payable}\nThis is the exact amount Razorpay will charge.`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Continue to Razorpay',
+            onPress: () => navigation.navigate('RazorpayCheckoutScreen', {
+              order,
+              prefill: {
+                name: booking.memberName,
+                email: member?.email || guest?.email,
+                contact: member?.phone || guest?.phone,
+              },
+              context: { meetingBookingId: booking.id, amount: order.amount },
+              title: 'Meeting Room Payment',
+            }),
+          },
+        ],
+      );
+    } catch (error) {
+      Alert.alert('Payment unavailable', error instanceof Error ? error.message : 'Please try again.');
+    } finally {
+      setPayingId(null);
+    }
+  };
   const formatDate = (value: string) => {
     const parsed = new Date(value);
     return Number.isNaN(parsed.getTime())
@@ -225,7 +298,7 @@ export function AllRoomBookingsScreen() {
     roomName: booking.room,
     floor: booking.floor,
     memberName: booking.memberName,
-    companyName: booking.company,
+    companyName: roomBookingCompanyName(booking, companies, members),
     memberId: booking.memberId,
     guestId: booking.guestId,
     clientId: booking.clientId,
@@ -239,6 +312,7 @@ export function AllRoomBookingsScreen() {
     startTime: booking.startTime,
     endTime: booking.endTime,
     status: normalizeRoomBookingStatus(booking.status),
+    paymentMethod: booking.paymentMethod,
     attendees: booking.attendees,
   }));
   const todayLabel = formatDate(new Date().toISOString());
@@ -584,6 +658,8 @@ export function AllRoomBookingsScreen() {
         renderItem={({ item }) => (
           <BookingCard
             booking={item}
+            paying={payingId === item.id}
+            onPay={() => payBooking(item)}
             onViewProfile={() => {
               if (item.profileTarget?.type === 'member')
                 navigation.navigate('MemberDetailScreen', {
@@ -820,6 +896,13 @@ const styles = StyleSheet.create({
     borderTopColor: Colors.borderDefault,
   },
   detailsButtonText: { ...Typography.caption, color: Colors.accent300 },
+  payButton: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: Spacing.sm,
+    marginHorizontal: Spacing.lg, marginBottom: Spacing.lg, paddingVertical: Spacing.md,
+    borderRadius: BorderRadius.md, backgroundColor: Colors.accent300,
+  },
+  payButtonDisabled: { opacity: 0.5 },
+  payButtonText: { ...Typography.secondaryBody, color: Colors.white },
   timeBar: {
     flexDirection: 'row',
     alignItems: 'center',

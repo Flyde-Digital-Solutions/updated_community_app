@@ -48,13 +48,22 @@ import {
 import { useDayPassCatalog } from '../../hooks/useDayPassCatalog';
 import { useTicketFormOptions } from '../../hooks/useTicketFormOptions';
 import { apiClient } from '../../services/apiClient';
+import { printerDocumentFileName } from '../../utils/printerDocument';
 import { Routes } from '../../services/routes';
 import { downloadAuthenticatedFile } from '../../utils/downloadFile';
-import { dayPassCreditSuccessMessage } from '../../utils/dayPass';
+import { dayPassCreditSuccessMessage, estimateDayPassPayable } from '../../utils/dayPass';
 import { KeyboardSafeScrollView } from '../../components/molecules/KeyboardSafeScrollView';
 import { formatRecordValue } from '../../utils/displayRecord';
 import { isPastDateTime, localDateString } from '../../utils/dateTimeValidation';
 import { pickedAttachment } from '../../utils/pickedAttachment';
+import { checkLeadContactDuplicates, duplicateExists, leadDuplicateMessage } from '../../utils/leadData';
+import { canManageIssuedRfidCard, isRfidCardAssigned } from '../../utils/rfidCard';
+import {
+  GST_TREATMENT_OPTIONS,
+  INDIAN_STATE_OPTIONS,
+  LEAD_GENDER_OPTIONS,
+  stateName,
+} from '../../utils/leadOptions';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 type OperationRoute =
@@ -123,6 +132,8 @@ function FormSheet({
   onSave,
   saving = false,
   saveLabel = 'Save',
+  missingFields = [],
+  blockedReason,
   children,
 }: {
   visible: boolean;
@@ -131,6 +142,8 @@ function FormSheet({
   onSave(): void;
   saving?: boolean;
   saveLabel?: string;
+  missingFields?: string[];
+  blockedReason?: string;
   children: React.ReactNode;
 }) {
   const insets = useSafeAreaInsets();
@@ -176,9 +189,13 @@ function FormSheet({
               {children}
             </KeyboardSafeScrollView>
             <TouchableOpacity
-              onPress={onSave}
+              onPress={() => missingFields.length
+                ? Alert.alert('Mandatory fields missing', `Please complete: ${missingFields.join(', ')}.`)
+                : blockedReason
+                ? Alert.alert('Cannot create OD lead', blockedReason)
+                : onSave()}
               disabled={saving}
-              style={[styles.primaryButton, saving && styles.disabled]}
+              style={[styles.primaryButton, (saving || missingFields.length > 0 || blockedReason) && styles.disabled]}
             >
               <Text style={styles.primaryButtonText}>
                 {saving ? 'Saving…' : saveLabel}
@@ -198,6 +215,8 @@ function Field({
   placeholder,
   multiline = false,
   keyboardType = 'default',
+  required = false,
+  existing = false,
 }: {
   label: string;
   value: string;
@@ -205,19 +224,37 @@ function Field({
   placeholder?: string;
   multiline?: boolean;
   keyboardType?: 'default' | 'email-address' | 'phone-pad' | 'number-pad';
+  required?: boolean;
+  existing?: boolean;
 }) {
   return (
     <View style={styles.field}>
-      <Text style={styles.fieldLabel}>{label}</Text>
-      <TextInput
-        value={value}
-        onChangeText={onChangeText}
-        placeholder={placeholder}
-        placeholderTextColor={Colors.textMuted}
-        multiline={multiline}
-        keyboardType={keyboardType}
-        style={[styles.input, multiline && styles.multiline]}
-      />
+      <Text style={styles.fieldLabel}>{label}{required ? ' *' : ''}</Text>
+      <View>
+        {existing ? (
+          <Icon
+            name="check-circle"
+            size={17}
+            color={Colors.success}
+            style={styles.existingFieldTick}
+            accessibilityLabel={`${label} already exists`}
+            pointerEvents="none"
+          />
+        ) : null}
+        <TextInput
+          value={value}
+          onChangeText={onChangeText}
+          placeholder={placeholder}
+          placeholderTextColor={Colors.textMuted}
+          multiline={multiline}
+          keyboardType={keyboardType}
+          style={[
+            styles.input,
+            multiline && styles.multiline,
+            existing && styles.inputWithExistingTick,
+          ]}
+        />
+      </View>
     </View>
   );
 }
@@ -246,14 +283,16 @@ function AttachmentPicker({
   file,
   onPress,
   accept,
+  label = 'File',
 }: {
   file: FileAttachment | null;
   onPress(): void;
   accept: string;
+  label?: string;
 }) {
   return (
     <View style={styles.field}>
-      <Text style={styles.fieldLabel}>File</Text>
+      <Text style={styles.fieldLabel}>{label}</Text>
       <TouchableOpacity onPress={onPress} style={styles.filePicker}>
         <Icon
           name={file ? 'file-check-outline' : 'file-upload-outline'}
@@ -314,13 +353,13 @@ const MODULES: Array<{
   route: OperationRoute;
 }> = [
   // { title: 'Events', description: 'Create, publish and manage RSVPs', icon: 'calendar-star', color: '#A78BFA', route: 'EventsScreen' },
-  {
-    title: 'Community',
-    description: 'Announcements and member posts',
-    icon: 'account-group-outline',
-    color: '#30BCED',
-    route: 'CommunityScreen',
-  },
+  // {
+  //   title: 'Community',
+  //   description: 'Announcements and member posts',
+  //   icon: 'account-group-outline',
+  //   color: '#30BCED',
+  //   route: 'CommunityScreen',
+  // },
   {
     title: 'Leads',
     description: 'Enquiries and conversion pipeline',
@@ -363,13 +402,13 @@ const MODULES: Array<{
     color: Colors.accent200,
     route: 'MeetingRoomsInventoryScreen',
   },
-  {
-    title: 'Invoices',
-    description: 'Payments, e-invoices and Zoho actions',
-    icon: 'file-document-outline',
-    color: Colors.success,
-    route: 'InvoicesScreen',
-  },
+  // {
+  //   title: 'Invoices',
+  //   description: 'Payments, e-invoices and Zoho actions',
+  //   icon: 'file-document-outline',
+  //   color: Colors.success,
+  //   route: 'InvoicesScreen',
+  // },
   {
     title: 'Extended Hours',
     description: 'Submit requests for admin review',
@@ -472,6 +511,15 @@ export function EventsScreen() {
     () => events.find(event => event.id === editingId),
     [editingId, events],
   );
+  const missingEventFields = [
+    !title.trim() && 'Event name', !description.trim() && 'Description',
+    !categoryId && 'Category', subcategories.length > 0 && !subcategoryId && 'Subcategory',
+    !rsvpClosingDate && 'RSVP closing date', !rsvpClosingTime && 'RSVP closing time',
+    !date && 'Date', !startTime && 'Start', !endTime && 'End',
+    !isExternal && !buildingId && 'Building',
+    isExternal && !venueAddress.trim() && 'Venue address',
+    eventSpeakers.some(speaker => !speaker.name.trim()) && 'Speaker name',
+  ].filter((item): item is string => Boolean(item));
 
   useEffect(() => {
     if (!editingEvent || !categories.length) return;
@@ -808,16 +856,19 @@ export function EventsScreen() {
         onClose={() => setOpen(false)}
         onSave={save}
         saving={saving}
+        missingFields={missingEventFields}
       >
-        <Field label="Event name" value={title} onChangeText={setTitle} />
+        <Field label="Event name" required value={title} onChangeText={setTitle} />
         <Field
           label="Description"
+          required
           value={description}
           onChangeText={setDescription}
           multiline
         />
         <DropdownField
           label="Category"
+          required
           value={categoryId}
           options={categories}
           onChange={value => {
@@ -829,6 +880,7 @@ export function EventsScreen() {
         />
         <DropdownField
           label="Subcategory"
+          required={subcategories.length > 0}
           value={subcategoryId}
           options={subcategories}
           onChange={setSubcategoryId}
@@ -856,6 +908,7 @@ export function EventsScreen() {
             </View>
             <Field
               label="Speaker name"
+              required
               value={speaker.name}
               onChangeText={value =>
                 setEventSpeakers(current =>
@@ -997,6 +1050,7 @@ export function EventsScreen() {
           <View style={styles.flex}>
             <DropdownField
               label="End"
+              required
               value={endTime}
               options={EVENT_TIME_OPTIONS.filter(option => !isPastDateTime(date, option.value))}
               onChange={setEndTime}
@@ -1018,7 +1072,7 @@ export function EventsScreen() {
             searchable
           />
         ) : null}
-        <Text style={styles.fieldLabel}>Event location</Text>
+        <Text style={styles.fieldLabel}>Event location *</Text>
         <View style={styles.chips}>
           {[
             { label: 'At selected building', value: false },
@@ -1043,6 +1097,7 @@ export function EventsScreen() {
           <>
             <Field
               label="Venue address"
+              required
               value={venueAddress}
               onChangeText={setVenueAddress}
               multiline
@@ -1174,6 +1229,7 @@ export function CommunityScreen() {
         onSave={save}
         saving={saving}
         saveLabel="Publish"
+        missingFields={!message.trim() ? ['Message'] : []}
       >
         <View style={styles.chips}>
           {(['Announcement', 'Update', 'Offer'] as const).map(value => (
@@ -1187,6 +1243,7 @@ export function CommunityScreen() {
         </View>
         <Field
           label="Message"
+          required
           value={message}
           onChangeText={setMessage}
           multiline
@@ -1198,40 +1255,128 @@ export function CommunityScreen() {
 
 export function LeadsScreen() {
   const navigation = useNavigation<Nav>();
-  const { leads, createLead } = useApp();
+  const { leads, createLead, buildings, user } = useApp();
   const [open, setOpen] = useState(false);
+  const [savingLead, setSavingLead] = useState(false);
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
+  const [emailDuplicate, setEmailDuplicate] = useState<{ value: string; exists: boolean } | null>(null);
+  const [phoneDuplicate, setPhoneDuplicate] = useState<{ value: string; exists: boolean } | null>(null);
   const [company, setCompany] = useState('');
+  const [gender, setGender] = useState('');
+  const [gstNo, setGstNo] = useState('');
+  const [gstTreatment, setGstTreatment] = useState('');
+  const [placeOfSupply, setPlaceOfSupply] = useState('');
   const [address, setAddress] = useState('');
+  const [billingCity, setBillingCity] = useState('');
+  const [billingState, setBillingState] = useState('');
   const [pincode, setPincode] = useState('');
-  const [kycDocument, setKycDocument] = useState<FileAttachment | null>(null);
+  const [country, setCountry] = useState('IN');
+  const [kycDocuments, setKycDocuments] = useState<FileAttachment[]>([]);
+  const selectedBuilding = buildings.find(item => item.id === user?.buildingId);
+  const checkedEmail = email.trim().toLowerCase();
+  const emailExists = emailDuplicate?.value === checkedEmail && emailDuplicate.exists;
+  const phoneExists = phoneDuplicate?.value === phone && phoneDuplicate.exists;
+  const duplicateReason = leadDuplicateMessage(Boolean(emailExists), Boolean(phoneExists));
+
+  useEffect(() => {
+    if (!open || !/^\S+@\S+\.\S+$/.test(checkedEmail)) return;
+    let cancelled = false;
+    const timeout = setTimeout(() => {
+      apiClient.get<Record<string, unknown>>(Routes.checkDuplicate, { email: checkedEmail })
+        .then(response => {
+          const exists = duplicateExists(response);
+          if (!cancelled && exists !== null)
+            setEmailDuplicate({ value: checkedEmail, exists });
+        })
+        .catch(() => {
+          if (!cancelled) setEmailDuplicate(null);
+        });
+    }, 400);
+    return () => {
+      cancelled = true;
+      clearTimeout(timeout);
+    };
+  }, [checkedEmail, open]);
+
+  useEffect(() => {
+    if (!open || !/^\d{10}$/.test(phone)) return;
+    let cancelled = false;
+    const timeout = setTimeout(() => {
+      apiClient.get<Record<string, unknown>>(Routes.checkDuplicate, { phone })
+        .then(response => {
+          const exists = duplicateExists(response);
+          if (!cancelled && exists !== null)
+            setPhoneDuplicate({ value: phone, exists });
+        })
+        .catch(() => {
+          if (!cancelled) setPhoneDuplicate(null);
+        });
+    }, 400);
+    return () => {
+      cancelled = true;
+      clearTimeout(timeout);
+    };
+  }, [phone, open]);
   const save = async () => {
+    if (savingLead) return;
     if (
+      !selectedBuilding ||
       !firstName.trim() ||
       !lastName.trim() ||
       !email.trim() ||
       !/^\S+@\S+\.\S+$/.test(email.trim()) ||
       !/^\d{10}$/.test(phone) ||
-      !address.trim() ||
-      !/^\d{6}$/.test(pincode)
+      !gender
     )
       return Alert.alert(
         'Missing details',
-        'Name, valid email, 10-digit phone number, address, and 6-digit pincode are required.',
+        'First name, last name, valid email, 10-digit phone number, and gender are required.',
       );
+    if (pincode && !/^\d{6}$/.test(pincode))
+      return Alert.alert('Invalid pincode', 'Enter a valid 6-digit pincode.');
+    if (gstNo && !/^[0-9A-Z]{15}$/.test(gstNo.trim().toUpperCase()))
+      return Alert.alert('Invalid GSTIN', 'Enter a valid 15-character GSTIN.');
+    const hasBilling = Boolean(gstNo || gstTreatment || placeOfSupply || address || billingCity || billingState || pincode);
     try {
+      setSavingLead(true);
+      const checked = await checkLeadContactDuplicates(
+        checkedEmail,
+        phone,
+        params => apiClient.get<Record<string, unknown>>(Routes.checkDuplicate, params),
+      );
+      setEmailDuplicate({ value: checkedEmail, exists: checked.emailExists });
+      setPhoneDuplicate({ value: phone, exists: checked.phoneExists });
+      if (checked.emailExists || checked.phoneExists) {
+        Alert.alert(
+          'Cannot create OD lead',
+          leadDuplicateMessage(checked.emailExists, checked.phoneExists),
+        );
+        return;
+      }
       await createLead({
         name: `${firstName.trim()} ${lastName.trim()}`,
-        email: email.trim(),
+        email: checkedEmail,
         phone,
         company,
         purpose: '',
+        gender,
+        gstNo: gstNo.trim().toUpperCase() || undefined,
+        gstTreatment: gstTreatment || undefined,
+        placeOfSupply: placeOfSupply || undefined,
+        billingAddress: hasBilling ? {
+          address: address.trim(),
+          city: billingCity.trim(),
+          state: stateName(billingState),
+          stateCode: billingState,
+          zip: pincode,
+          country: country.trim().toUpperCase() || 'IN',
+        } : undefined,
         address: address.trim(),
         pincode,
-        kycDocument: kycDocument || undefined,
+        kycDocumentsUpload: kycDocuments,
       });
       setOpen(false);
       setFirstName('');
@@ -1239,11 +1384,20 @@ export function LeadsScreen() {
       setEmail('');
       setPhone('');
       setCompany('');
+      setGender('');
+      setGstNo('');
+      setGstTreatment('');
+      setPlaceOfSupply('');
       setAddress('');
+      setBillingCity('');
+      setBillingState('');
       setPincode('');
-      setKycDocument(null);
+      setCountry('IN');
+      setKycDocuments([]);
     } catch (error) {
       alertActionError('Lead not created', error);
+    } finally {
+      setSavingLead(false);
     }
   };
   return (
@@ -1292,36 +1446,83 @@ export function LeadsScreen() {
       />
       <FormSheet
         visible={open}
-        title="Add Lead"
-        onClose={() => setOpen(false)}
+        title="Create OD Lead"
+        onClose={() => { if (!savingLead) setOpen(false); }}
         onSave={save}
+        saving={savingLead}
+        saveLabel="Create OD Lead"
+        blockedReason={duplicateReason}
+        missingFields={[
+          !selectedBuilding && 'Origin building',
+          !firstName.trim() && 'First name', !lastName.trim() && 'Last name',
+          !email.trim() && 'Email',
+          email.trim() && !/^\S+@\S+\.\S+$/.test(email.trim()) && 'Valid email',
+          phone.length !== 10 && 'Phone', !gender && 'Gender',
+        ].filter((item): item is string => Boolean(item))}
       >
+        <Text style={styles.fieldLabel}>Origin building *</Text>
+        <Text style={styles.meta}>{selectedBuilding?.name || 'Select a building in the app header'}</Text>
         <Field
           label="First name"
+          required
           value={firstName}
           onChangeText={setFirstName}
         />
-        <Field label="Last name" value={lastName} onChangeText={setLastName} />
+        <Field label="Last name" required value={lastName} onChangeText={setLastName} />
         <Field
           label="Email"
+          required
           value={email}
           onChangeText={setEmail}
           keyboardType="email-address"
+          existing={Boolean(emailExists)}
         />
         <Field
           label="Phone"
+          required
           value={phone}
           onChangeText={value =>
             setPhone(value.replace(/\D/g, '').slice(0, 10))
           }
           keyboardType="phone-pad"
+          existing={Boolean(phoneExists)}
         />
         <Field label="Company" value={company} onChangeText={setCompany} />
+        <DropdownField
+          label="Gender"
+          required
+          value={gender}
+          options={LEAD_GENDER_OPTIONS}
+          onChange={setGender}
+        />
+        <Text style={styles.moduleTitle}>Billing details (optional)</Text>
+        <Field label="GSTIN" value={gstNo} onChangeText={value => setGstNo(value.toUpperCase().slice(0, 15))} />
+        <DropdownField
+          label="GST treatment"
+          value={gstTreatment}
+          options={GST_TREATMENT_OPTIONS}
+          onChange={setGstTreatment}
+        />
+        <DropdownField
+          label="Place of supply"
+          value={placeOfSupply}
+          options={INDIAN_STATE_OPTIONS}
+          onChange={setPlaceOfSupply}
+          searchable
+        />
         <Field
-          label="Address"
+          label="Billing address"
           value={address}
           onChangeText={setAddress}
           multiline
+        />
+        <Field label="Billing city" value={billingCity} onChangeText={setBillingCity} />
+        <DropdownField
+          label="Billing state"
+          value={billingState}
+          options={INDIAN_STATE_OPTIONS}
+          onChange={setBillingState}
+          searchable
         />
         <Field
           label="Pincode"
@@ -1331,29 +1532,43 @@ export function LeadsScreen() {
           }
           keyboardType="number-pad"
         />
+        <Field label="Country" value={country} onChangeText={setCountry} />
         <AttachmentPicker
-          file={kycDocument}
-          accept="JPG, JPEG, PNG or PDF · maximum 10 MB"
+          file={kycDocuments[0] || null}
+          label="KYC documents (optional)"
+          accept="JPG, JPEG, PNG or PDF · maximum 5 MB"
           onPress={async () => {
             try {
-              const [file] = await pick({
+              const files = await pick({
                 type: [types.images, types.pdf],
-                allowMultiSelection: false,
+                allowMultiSelection: true,
               });
-              if (!file) return;
-              const attachment = asAttachment(file);
-              if (attachment.size && attachment.size > 10 * 1024 * 1024)
+              if (!files.length) return;
+              if (files.some(file => file.size && file.size > 5 * 1024 * 1024))
                 return Alert.alert(
                   'File too large',
-                  'Choose a document smaller than 10 MB.',
+                  'Each document must be 5 MB or smaller.',
                 );
-              setKycDocument(attachment);
+              const attachments = await Promise.all(files.map(file => pickedAttachment(file)));
+              setKycDocuments(current => [...current, ...attachments]);
             } catch (error) {
               if (!isPickerCancelled(error))
                 alertActionError('KYC document unavailable', error);
             }
           }}
         />
+        {kycDocuments.map((document, index) => (
+          <TouchableOpacity
+            key={`${document.uri}-${index}`}
+            onPress={() => setKycDocuments(current => current.filter((_, itemIndex) => itemIndex !== index))}
+            style={styles.rowBetween}
+            accessibilityRole="button"
+            accessibilityLabel={`Remove ${document.name}`}
+          >
+            <Text style={[styles.meta, styles.flex]} numberOfLines={1}>{document.name}</Text>
+            <Icon name="close" size={18} color={Colors.textSecondary} />
+          </TouchableOpacity>
+        ))}
       </FormSheet>
     </View>
   );
@@ -1376,7 +1591,8 @@ export function RfidCardsScreen() {
   const [rfidImportMode, setRfidImportMode] = useState<'insert' | 'upsert'>(
     'insert',
   );
-  const [assigning, setAssigning] = useState<RfidCard | null>(null);
+  const [assignmentOpen, setAssignmentOpen] = useState(false);
+  const [assignmentCardId, setAssignmentCardId] = useState('');
   const [companyId, setCompanyId] = useState('');
   const [exporting, setExporting] = useState(false);
   const [downloadingSample, setDownloadingSample] = useState(false);
@@ -1389,6 +1605,7 @@ export function RfidCardsScreen() {
     try {
       setImporting(true);
       let count = 0;
+      let importResult: Awaited<ReturnType<typeof importRfidCards>> | null = null;
       if (clientImport) {
         const upload = (dryRun: boolean) => {
           const form = new FormData();
@@ -1416,15 +1633,35 @@ export function RfidCardsScreen() {
             : result;
         count = Number(root.assignedCount || root.count || 0);
         await syncAll();
-      } else count = await importRfidCards(rfidFile, rfidImportMode);
+      } else {
+        importResult = await importRfidCards(rfidFile, rfidImportMode);
+        count = importResult.createdCount;
+      }
       setRfidFile(null);
       setOpen(false);
-      Alert.alert(
-        'Import complete',
-        count > 0
-          ? `${count} RFID cards were imported.`
-          : 'The import was accepted and the card list was refreshed.',
-      );
+      if (importResult?.unchangedCardUids.length && !count && !importResult.updatedCount) {
+        Alert.alert(
+          'Cards already imported',
+          `No changes were made. Already in the list: ${importResult.unchangedCardUids.join(', ')}.`,
+        );
+      } else if (importResult?.updatedCount && !count) {
+        Alert.alert(
+          'Import complete',
+          `${importResult.updatedCount} RFID ${importResult.updatedCount === 1 ? 'card was' : 'cards were'} updated.`,
+        );
+      } else if (importResult && !count) {
+        Alert.alert(
+          'No new cards imported',
+          'No changes were made. The RFID card IDs in this file may already exist in the list.',
+        );
+      } else {
+        Alert.alert(
+          'Import complete',
+          count > 0
+            ? `${count} RFID ${count === 1 ? 'card was' : 'cards were'} imported.`
+            : 'The import was accepted and the card list was refreshed.',
+        );
+      }
     } catch (error) {
       Alert.alert(
         'Import failed',
@@ -1487,21 +1724,27 @@ export function RfidCardsScreen() {
         );
     }
   };
-  const openAssignment = (card: RfidCard) => {
-    setAssigning(card);
+  const assignableCards = rfidCards.filter(
+    card => !isRfidCardAssigned(card) && canManageIssuedRfidCard(card),
+  );
+  const openAssignment = (card?: RfidCard) => {
+    setAssignmentCardId(card?.id || '');
     setCompanyId(companies[0]?.id || '');
+    setAssignmentOpen(true);
   };
   const saveAssignment = async () => {
-    if (!assigning || !companyId)
+    const card = assignableCards.find(item => item.id === assignmentCardId);
+    if (!card || !companyId)
       return Alert.alert(
         'Missing assignment',
-        'Choose the client that should own this card.',
+        'Choose an available card and the client that should own it.',
       );
     const company = companies.find(item => item.id === companyId);
     if (!company) return;
     try {
-      await assignRfidCard(assigning.id, company.id, company.name);
-      setAssigning(null);
+      await assignRfidCard(card.id, company.id, company.name);
+      setAssignmentOpen(false);
+      setAssignmentCardId('');
     } catch (error) {
       alertActionError('Card not assigned', error);
     }
@@ -1536,15 +1779,31 @@ export function RfidCardsScreen() {
         ListHeaderComponent={
           <View style={styles.actions}>
             <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel="Assign RFID card"
+              onPress={() => openAssignment()}
+              style={styles.smallButton}
+            >
+              <Icon name="card-plus-outline" size={17} color={Colors.white} />
+              <Text style={styles.smallButtonText}>Assign Card</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
               disabled={exporting}
               onPress={async () => {
                 try {
+                  const buildingId = user?.buildingId?.trim();
+                  if (!buildingId)
+                    throw new Error('Select a building before exporting cards.');
                   setExporting(true);
                   await downloadAuthenticatedFile(
-                  `${Routes.rfidExport}?buildingId=${encodeURIComponent(
-                    user?.buildingId || '',
-                  )}`,
-                  'rfid-cards.xlsx',
+                    `${Routes.rfidExport}?buildingId=${encodeURIComponent(buildingId)}`,
+                    'rfid-cards.xlsx',
+                    'download',
+                    buildingId,
+                  );
+                  Alert.alert(
+                    'Export downloaded',
+                    'rfid-cards.xlsx was saved to this device.',
                   );
                 } catch (error) {
                   alertActionError('Export failed', error);
@@ -1581,14 +1840,14 @@ export function RfidCardsScreen() {
                 : ''}
             </Text>
             <View style={styles.actions}>
-              {item.status.toLowerCase() === 'active' && item.companyId ? (
+              {isRfidCardAssigned(item) ? (
                 <TouchableOpacity
                   onPress={() => unassign(item)}
                   style={styles.secondaryButton}
                 >
                   <Text style={styles.secondaryButtonText}>Unassign</Text>
                 </TouchableOpacity>
-              ) : item.status.toLowerCase() === 'active' ? (
+              ) : canManageIssuedRfidCard(item) ? (
                 <TouchableOpacity
                   onPress={() => openAssignment(item)}
                   style={styles.smallButton}
@@ -1596,7 +1855,7 @@ export function RfidCardsScreen() {
                   <Text style={styles.smallButtonText}>Assign Client</Text>
                 </TouchableOpacity>
               ) : null}
-              {item.status.toLowerCase() === 'active' ? <TouchableOpacity
+              {canManageIssuedRfidCard(item) ? <TouchableOpacity
                 onPress={() =>
                   changeBillingType(
                     item,
@@ -1609,7 +1868,7 @@ export function RfidCardsScreen() {
                   Set {item.billingType === 'PAID' ? 'Free' : 'Paid'}
                 </Text>
               </TouchableOpacity> : null}
-              {item.status.toLowerCase() === 'active' && (
+              {canManageIssuedRfidCard(item) && (
                 <TouchableOpacity
                   onPress={() => changeCardStatus(item, 'Inactive')}
                   style={styles.secondaryButton}
@@ -1617,7 +1876,7 @@ export function RfidCardsScreen() {
                   <Text style={styles.secondaryButtonText}>Deactivate</Text>
                 </TouchableOpacity>
               )}
-              {item.status.toLowerCase() === 'active' && <TouchableOpacity
+              {canManageIssuedRfidCard(item) && <TouchableOpacity
                 onPress={() => changeCardStatus(item, 'Lost')}
                 style={styles.secondaryButton}
               >
@@ -1638,8 +1897,9 @@ export function RfidCardsScreen() {
         onSave={importCards}
         saving={importing}
         saveLabel="Validate & Import"
+        missingFields={!rfidFile ? ['Import file'] : []}
       >
-        <Text style={styles.fieldLabel}>Import workflow</Text>
+        <Text style={styles.fieldLabel}>Import workflow *</Text>
         <View style={styles.chips}>
           {[
             { label: 'Import cards', value: false },
@@ -1665,7 +1925,7 @@ export function RfidCardsScreen() {
         </View>
         {!clientImport ? (
           <>
-            <Text style={styles.fieldLabel}>Import mode</Text>
+            <Text style={styles.fieldLabel}>Import mode *</Text>
             <View style={styles.chips}>
               {(
                 [
@@ -1701,14 +1961,23 @@ export function RfidCardsScreen() {
           disabled={downloadingSample}
           onPress={async () => {
             try {
+              const buildingId = user?.buildingId?.trim();
+              if (!buildingId)
+                throw new Error('Select a building before downloading the sample.');
               setDownloadingSample(true);
               await downloadAuthenticatedFile(
-              clientImport
-                ? Routes.rfidClientImportSample
-                : Routes.rfidImportSample,
-              clientImport
-                ? 'rfid-client-assignment-sample.csv'
-                : 'rfid-import-sample.csv',
+                clientImport
+                  ? Routes.rfidClientImportSample
+                  : Routes.rfidImportSample,
+                clientImport
+                  ? 'rfid-client-assignment-sample.csv'
+                  : 'rfid_cards_sample.csv',
+                'download',
+                buildingId,
+              );
+              Alert.alert(
+                'Sample downloaded',
+                `${clientImport ? 'rfid-client-assignment-sample.csv' : 'rfid_cards_sample.csv'} was saved to this device.`,
               );
             } catch (error) {
               alertActionError('Sample download failed', error);
@@ -1724,36 +1993,49 @@ export function RfidCardsScreen() {
         </TouchableOpacity>
         <AttachmentPicker
           file={rfidFile}
+          label="Import file *"
           onPress={chooseImportFile}
           accept="CSV, Excel or text · maximum 10 MB"
         />
       </FormSheet>
       <FormSheet
-        visible={Boolean(assigning)}
-        title={`Assign ${assigning?.uid || 'card'}`}
-        onClose={() => setAssigning(null)}
+        visible={assignmentOpen}
+        title="Assign RFID Card"
+        onClose={() => {
+          setAssignmentOpen(false);
+          setAssignmentCardId('');
+        }}
         onSave={saveAssignment}
+        missingFields={[
+          !assignmentCardId && 'Card',
+          !companyId && 'Client',
+        ].filter((item): item is string => Boolean(item))}
       >
         <Text style={styles.help}>
           Assigning a card links it to a client. Member credentials and access
           areas are provisioned through their dedicated access workflows.
         </Text>
-        <Text style={styles.fieldLabel}>Client</Text>
-        <View style={styles.chips}>
-          {companies.map(company => (
-            <TouchableOpacity
-              key={company.id}
-              onPress={() => setCompanyId(company.id)}
-            >
-              <Pill
-                label={company.name}
-                color={
-                  companyId === company.id ? Colors.accent300 : Colors.textMuted
-                }
-              />
-            </TouchableOpacity>
-          ))}
-        </View>
+        <DropdownField
+          label="Card"
+          required
+          value={assignmentCardId}
+          options={assignableCards.map(card => ({
+            value: card.id,
+            label: card.uid || 'Access card',
+          }))}
+          onChange={setAssignmentCardId}
+          placeholder={assignableCards.length ? 'Select an unassigned card' : 'No assignable cards available'}
+          searchable
+        />
+        <DropdownField
+          label="Client"
+          required
+          value={companyId}
+          options={companies.map(company => ({ value: company.id, label: company.name }))}
+          onChange={setCompanyId}
+          placeholder="Select a client"
+          searchable
+        />
       </FormSheet>
     </View>
   );
@@ -1811,17 +2093,21 @@ export function PrinterRequestsScreen() {
         allowMultiSelection: false,
       });
       const attachment = asAttachment(file);
-      if (!/\.(pdf|docx?|pptx?|jpe?g|png|webp)$/i.test(attachment.name))
+      let fileName: string;
+      try {
+        fileName = printerDocumentFileName(attachment);
+      } catch {
         return Alert.alert(
           'Unsupported file',
           'Choose a PDF, Word, PowerPoint, JPG, PNG or WebP file.',
         );
+      }
       if (attachment.size && attachment.size > 10 * 1024 * 1024)
         return Alert.alert(
           'File too large',
           'Choose a document no larger than 10 MB.',
         );
-      setDocument(await pickedAttachment(file));
+      setDocument(await pickedAttachment(file, fileName));
     } catch (error) {
       if (!isPickerCancelled(error))
         Alert.alert(
@@ -2024,9 +2310,14 @@ export function PrinterRequestsScreen() {
         onSave={submitRequest}
         saving={saving}
         saveLabel="Upload & Create"
+        missingFields={[
+          !document && 'Document', !clientId && 'Client',
+          (!copies || Number(copies) < 1) && 'Copies',
+        ].filter((item): item is string => Boolean(item))}
       >
         <AttachmentPicker
           file={document}
+          label="Document *"
           onPress={chooseDocument}
           accept="PDF, Word, PowerPoint, JPG, PNG or WebP · maximum 10 MB"
         />
@@ -2062,13 +2353,14 @@ export function PrinterRequestsScreen() {
         />
         <Field
           label="Copies"
+          required
           value={copies}
           onChangeText={value =>
             setCopies(value.replace(/\D/g, '').slice(0, 2))
           }
           keyboardType="number-pad"
         />
-        <Text style={styles.fieldLabel}>Print type</Text>
+        <Text style={styles.fieldLabel}>Print type *</Text>
         <View style={styles.chips}>
           {(
             [
@@ -2091,7 +2383,7 @@ export function PrinterRequestsScreen() {
             </TouchableOpacity>
           ))}
         </View>
-        <Text style={styles.fieldLabel}>Paper size</Text>
+        <Text style={styles.fieldLabel}>Paper size *</Text>
         <View style={styles.chips}>
           {(['A4', 'A3', 'Letter'] as const).map(value => (
             <TouchableOpacity key={value} onPress={() => setPaperSize(value)}>
@@ -2104,7 +2396,7 @@ export function PrinterRequestsScreen() {
             </TouchableOpacity>
           ))}
         </View>
-        <Text style={styles.fieldLabel}>Sides</Text>
+        <Text style={styles.fieldLabel}>Sides *</Text>
         <View style={styles.chips}>
           {(
             [
@@ -2140,6 +2432,7 @@ export function PrinterRequestsScreen() {
         onSave={completeAndCharge}
         saving={charging}
         saveLabel="Complete & Deduct"
+        missingFields={!chargeCredits || Number(chargeCredits) <= 0 ? ['Credits to deduct'] : []}
       >
         <Text style={styles.cardTitle}>{chargingRequest?.fileName}</Text>
         <Text style={styles.help}>
@@ -2148,6 +2441,7 @@ export function PrinterRequestsScreen() {
         </Text>
         <Field
           label="Credits to deduct"
+          required
           value={chargeCredits}
           onChangeText={value =>
             setChargeCredits(value.replace(/\D/g, '').slice(0, 6))
@@ -2387,8 +2681,8 @@ export function BillingScreen() {
         renderItem={({ item }) => (
           <View style={styles.card}>
             <View style={styles.rowBetween}>
-              <View>
-                <Text style={styles.cardTitle}>{item.name}</Text>
+              <View style={styles.cardIdentity}>
+                <Text style={styles.cardTitle} numberOfLines={2}>{item.name}</Text>
                 <Text style={styles.meta}>
                   {item.contactPerson} · {item.cabin}
                 </Text>
@@ -2413,9 +2707,11 @@ export function BillingScreen() {
         onSave={approve}
         saving={saving}
         saveLabel="Approve"
+        missingFields={!approvedPercent.trim() ? ['Approved percent'] : []}
       >
         <Field
           label="Approved percent"
+          required
           value={approvedPercent}
           onChangeText={value =>
             setApprovedPercent(value.replace(/[^\d.]/g, ''))
@@ -2498,6 +2794,10 @@ export function CreateTicketScreen() {
     'Low' | 'Medium' | 'High' | 'Urgent'
   >(existing?.priority || 'Medium');
   const [saving, setSaving] = useState(false);
+  const missingTicketFields = [
+    !subject.trim() && 'Subject', !description.trim() && 'Description',
+    !clientId && 'Client',
+  ].filter((item): item is string => Boolean(item));
   const subcategories = useMemo(
     () =>
       categories.find(item => item.value === categoryId)?.subcategories || [],
@@ -2605,15 +2905,17 @@ export function CreateTicketScreen() {
         subtitle={existing ? 'Update ticket details' : 'Log a member issue'}
       />
       <KeyboardSafeScrollView contentContainerStyle={styles.formPage}>
-        <Field label="Subject" value={subject} onChangeText={setSubject} />
+        <Field label="Subject" required value={subject} onChangeText={setSubject} />
         <Field
           label="Description"
+          required
           value={description}
           onChangeText={setDescription}
           multiline
         />
         <DropdownField
           label="Client"
+          required
           value={clientId}
           options={companies.map(company => ({
             value: company.id,
@@ -2653,7 +2955,7 @@ export function CreateTicketScreen() {
           placeholder="Optional assignee"
           searchable
         />
-        <Text style={styles.fieldLabel}>Status</Text>
+        <Text style={styles.fieldLabel}>Status *</Text>
         <View style={styles.chips}>
           {(['Open', 'In Progress', 'Resolved', 'Closed'] as const).map(
             value => (
@@ -2666,7 +2968,7 @@ export function CreateTicketScreen() {
             ),
           )}
         </View>
-        <Text style={styles.fieldLabel}>Priority</Text>
+        <Text style={styles.fieldLabel}>Priority *</Text>
         <View style={styles.chips}>
           {(['Low', 'Medium', 'High', 'Urgent'] as const).map(value => (
             <TouchableOpacity key={value} onPress={() => setPriority(value)}>
@@ -2696,9 +2998,11 @@ export function CreateTicketScreen() {
           />
         ) : null}
         <TouchableOpacity
-          onPress={save}
+          onPress={() => missingTicketFields.length
+            ? Alert.alert('Mandatory fields missing', `Please complete: ${missingTicketFields.join(', ')}.`)
+            : save()}
           disabled={saving}
-          style={[styles.primaryButton, saving && styles.disabled]}
+          style={[styles.primaryButton, (saving || missingTicketFields.length > 0) && styles.disabled]}
         >
           <Text style={styles.primaryButtonText}>
             {saving ? 'Saving…' : existing ? 'Save Changes' : 'Create Ticket'}
@@ -2724,6 +3028,10 @@ export function InviteVisitorScreen() {
   const [arrivalTime, setArrivalTime] = useState('10:00');
   const [saving, setSaving] = useState(false);
   const host = members.find(member => member.id === hostId);
+  const missingVisitorFields = [
+    !name.trim() && 'Visitor name', phone.length !== 10 && 'Phone',
+    !hostId && 'Host', !visitDate && 'Visit date', !arrivalTime && 'Visit time',
+  ].filter((item): item is string => Boolean(item));
   const save = async () => {
     if (
       !name.trim() ||
@@ -2767,7 +3075,7 @@ export function InviteVisitorScreen() {
     <View style={styles.root}>
       <Header title="Invite Visitor" subtitle="Create a reception entry" />
       <KeyboardSafeScrollView contentContainerStyle={styles.formPage}>
-        <Field label="Visitor name" value={name} onChangeText={setName} />
+        <Field label="Visitor name" required value={name} onChangeText={setName} />
         <Field
           label="Email"
           value={email}
@@ -2776,6 +3084,7 @@ export function InviteVisitorScreen() {
         />
         <Field
           label="Phone"
+          required
           value={phone}
           onChangeText={value =>
             setPhone(value.replace(/\D/g, '').slice(0, 10))
@@ -2790,6 +3099,7 @@ export function InviteVisitorScreen() {
         />
         <DropdownField
           label="Host"
+          required
           value={hostId}
           options={members.map(member => ({
             value: member.id,
@@ -2805,12 +3115,14 @@ export function InviteVisitorScreen() {
         />
         <DropdownField
           label="Visit date"
+          required
           value={visitDate}
           options={EVENT_DATE_OPTIONS}
           onChange={setVisitDate}
         />
         <DropdownField
           label="Visit time"
+          required
           value={arrivalTime}
           options={EVENT_TIME_OPTIONS.filter(option => !isPastDateTime(visitDate, option.value))}
           onChange={setArrivalTime}
@@ -2822,9 +3134,11 @@ export function InviteVisitorScreen() {
           multiline
         />
         <TouchableOpacity
-          onPress={save}
+          onPress={() => missingVisitorFields.length
+            ? Alert.alert('Mandatory fields missing', `Please complete: ${missingVisitorFields.join(', ')}.`)
+            : save()}
           disabled={saving}
-          style={[styles.primaryButton, saving && styles.disabled]}
+          style={[styles.primaryButton, (saving || missingVisitorFields.length > 0) && styles.disabled]}
         >
           <Text style={styles.primaryButtonText}>
             {saving ? 'Creating…' : 'Send Invitation'}
@@ -2895,6 +3209,13 @@ export function BookDayPassScreen() {
   const totalAmount =
     subtotal * (1 - Math.min(100, Math.max(0, manualDiscount)) / 100);
   const discountCap = building?.communityDiscountMaxPercent ?? 10;
+  const missingDayPassFields = [
+    !selectedBuildingId && 'Building',
+    purchaseType === 'bundle' && !bundleId && 'Bundle',
+    !recipientId && (recipientType === 'member' ? 'Member' : 'On-Demand User'),
+    purchaseType === 'single' && !date && 'Date',
+    manualDiscount > 0 && !discountReason.trim() && 'Discount reason',
+  ].filter((item): item is string => Boolean(item));
 
   useEffect(() => {
     if (purchaseType !== 'bundle' || !availableBundles.length) return;
@@ -3048,31 +3369,26 @@ export function BookDayPassScreen() {
         ]);
       } else if (paymentMethod === 'razorpay' && paymentOrder) {
         navigation.replace('RazorpayCheckoutScreen', {
-          order: {
-            key: paymentOrder.key,
-            amount: paymentOrder.amount,
-            orderId: paymentOrder.orderId,
-            description: paymentOrder.description,
-          },
+          order: paymentOrder,
+          context: paymentContext,
           prefill: {
             name: recipient.name,
             email: recipient.email,
             contact: recipient.phone,
           },
-          context: paymentContext,
           title: 'Day Pass Payment',
         });
       } else if (paymentMethod === 'razorpay' && paymentUrl) {
-        navigation.replace('PaymentWebViewScreen', {
-          url: paymentUrl,
-          context: paymentContext,
-          title: 'Day Pass Payment',
-        });
+        Alert.alert(
+          'Exact price unavailable',
+          'The booking was created, but the service did not provide a payable amount. Payment cannot open until its final price is confirmed.',
+          [{ text: 'Done', onPress: () => navigation.goBack() }],
+        );
       } else if (paymentMethod === 'razorpay') {
         Alert.alert(
-          'Payment pending',
-          'The booking was created, but a payment link could not be opened. Please retry payment from the booking record.',
-          [{ text: 'Done', onPress: () => navigation.goBack() }],
+          'Payment could not start',
+          'The booking was created, but the payment service did not return a payable order. Open the booking and use Complete Payment.',
+          [{ text: 'View passes', onPress: () => navigation.replace('AllDayPassesScreen') }],
         );
       } else {
         Alert.alert(
@@ -3119,7 +3435,7 @@ export function BookDayPassScreen() {
         subtitle={building?.name || 'Single passes and bundles'}
       />
       <KeyboardSafeScrollView contentContainerStyle={styles.formPage}>
-        <Text style={styles.fieldLabel}>User type</Text>
+        <Text style={styles.fieldLabel}>User type *</Text>
         <View style={styles.chips}>
           {(['member', 'customer'] as const).map(value => (
             <TouchableOpacity
@@ -3137,13 +3453,14 @@ export function BookDayPassScreen() {
         </View>
         <DropdownField
           label="Building"
+          required
           value={selectedBuildingId}
           options={buildings.map(item => ({ value: item.id, label: item.name }))}
           onChange={setSelectedBuildingId}
           placeholder={catalogLoading ? 'Loading buildings…' : 'Select a building'}
           searchable
         />
-        <Text style={styles.fieldLabel}>Pass type</Text>
+        <Text style={styles.fieldLabel}>Pass type *</Text>
         <View style={styles.chips}>
           {(['single', 'bundle'] as const).map(value => (
             <TouchableOpacity key={value} onPress={() => setPurchaseType(value)}>
@@ -3157,6 +3474,7 @@ export function BookDayPassScreen() {
         {purchaseType === 'bundle' ? (
           <DropdownField
             label="Bundle"
+            required
             value={bundleId}
             options={availableBundles.map(item => ({
               value: item.id,
@@ -3170,6 +3488,7 @@ export function BookDayPassScreen() {
         ) : null}
         <DropdownField
           label={recipientType === 'member' ? 'Member' : 'On-Demand User'}
+          required
           value={recipientId}
           options={(recipientType === 'member'
             ? members.filter(item => item.status === 'Active')
@@ -3208,17 +3527,22 @@ export function BookDayPassScreen() {
             ) : null}
           </View>
         ) : null}
-        <DropdownField
-          label="Date"
-          value={date}
-          options={EVENT_DATE_OPTIONS}
-          onChange={setDate}
-        />
-        <TouchableOpacity onPress={check} style={styles.secondaryButton}>
-          <Text style={styles.secondaryButtonText}>
-            Check date availability
-          </Text>
-        </TouchableOpacity>
+        {purchaseType === 'single' ? (
+          <>
+            <DropdownField
+              label="Date"
+              required
+              value={date}
+              options={EVENT_DATE_OPTIONS}
+              onChange={setDate}
+            />
+            <TouchableOpacity onPress={check} style={styles.secondaryButton}>
+              <Text style={styles.secondaryButtonText}>
+                Check date availability
+              </Text>
+            </TouchableOpacity>
+          </>
+        ) : null}
         <View style={styles.priceSummary}>
           <Text style={styles.meta}>
             {purchaseType === 'bundle'
@@ -3228,10 +3552,18 @@ export function BookDayPassScreen() {
               : passType}
           </Text>
           <Text style={styles.amount}>
-            ₹{Math.round(totalAmount).toLocaleString('en-IN')}
+            {totalAmount > 0
+              ? `₹${estimateDayPassPayable(totalAmount).toLocaleString('en-IN', {
+                  minimumFractionDigits: 2,
+                  maximumFractionDigits: 2,
+                })}`
+              : 'Price unavailable'}
+          </Text>
+          <Text style={styles.meta}>
+            {`Payable amount including 18% tax (base ₹${Math.round(totalAmount).toLocaleString('en-IN')}).`}
           </Text>
         </View>
-        <Text style={styles.fieldLabel}>Payment method</Text>
+        <Text style={styles.fieldLabel}>Payment method *</Text>
         <Text style={styles.help}>Razorpay</Text>
         {paymentMethod === 'razorpay' ? (
           <>
@@ -3245,6 +3577,7 @@ export function BookDayPassScreen() {
             />
             <Field
               label="Discount reason"
+              required={manualDiscount > 0}
               value={discountReason}
               onChangeText={setDiscountReason}
               placeholder="Why is this discount being offered?"
@@ -3261,34 +3594,29 @@ export function BookDayPassScreen() {
           </Text>
         )}
         <TouchableOpacity
-          onPress={save}
+          onPress={() => {
+            if (missingDayPassFields.length) {
+              Alert.alert('Mandatory fields missing', `Please complete: ${missingDayPassFields.join(', ')}.`);
+            } else {
+              save();
+            }
+          }}
           disabled={
             saving ||
-            catalogLoading ||
-            !building ||
-            !recipient ||
-            totalAmount <= 0
+            catalogLoading
           }
           style={[
             styles.primaryButton,
             (saving ||
               catalogLoading ||
+              missingDayPassFields.length > 0 ||
               !building ||
-              !recipient ||
               totalAmount <= 0) &&
               styles.disabled,
           ]}
         >
           <Text style={styles.primaryButtonText}>
-            {saving
-              ? 'Submitting…'
-              : `Purchase ${
-                  purchaseType === 'bundle'
-                    ? 'Bundle'
-                    : recipientType === 'member'
-                    ? 'Member Pass'
-                    : 'Day Pass'
-                }`}
+            {saving ? 'Submitting…' : 'Pay & Book'}
           </Text>
         </TouchableOpacity>
       </KeyboardSafeScrollView>
@@ -3682,6 +4010,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.md,
     ...Typography.primaryBody,
     color: Colors.textPrimary,
+  },
+  inputWithExistingTick: { paddingLeft: 37 },
+  existingFieldTick: {
+    position: 'absolute',
+    left: Spacing.md,
+    top: 17,
+    zIndex: 1,
   },
   multiline: {
     minHeight: 105,

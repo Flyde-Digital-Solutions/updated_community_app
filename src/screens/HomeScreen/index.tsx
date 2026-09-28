@@ -66,7 +66,13 @@ function SendNotificationSheet({
   );
 
   const isValid = title.trim().length > 0 && message.trim().length > 0 && (inApp || emailChannel || smsChannel) &&
-    (audience !== 'Specific Member' || !!selectedMember);
+    (audience !== 'Specific Member' || !!selectedMember) && (audience !== 'Specific Cabin' || !!selectedCabin);
+  const missingNotificationFields = [
+    !title.trim() && 'Title', !message.trim() && 'Message',
+    audience === 'Specific Member' && !selectedMember && 'Member',
+    audience === 'Specific Cabin' && !selectedCabin && 'Cabin',
+    !(inApp || emailChannel || smsChannel) && 'Delivery channel',
+  ].filter((item): item is string => Boolean(item));
 
   const handleSend = async () => {
     if (!isValid) return;
@@ -112,6 +118,7 @@ function SendNotificationSheet({
 
               <DropdownField
                 label="Type"
+                required
                 value={type}
                 options={ALL_TYPES.map(item => ({ value: item, label: item }))}
                 onChange={value => setType(value as NotificationType)}
@@ -119,6 +126,7 @@ function SendNotificationSheet({
 
               <DropdownField
                 label="Send To"
+                required
                 value={audience}
                 options={ALL_AUDIENCES.map(item => ({ value: item, label: item }))}
                 onChange={value => setAudience(value as AudienceType)}
@@ -128,6 +136,7 @@ function SendNotificationSheet({
               {audience === 'Specific Cabin' && (
                 <DropdownField
                   label="Cabin"
+                  required
                   value={selectedCabin}
                   options={cabinNames.map(item => ({ value: item, label: item }))}
                   onChange={setSelectedCabin}
@@ -139,6 +148,7 @@ function SendNotificationSheet({
               {/* Member search */}
               {audience === 'Specific Member' && (
                 <View style={sheetStyles.memberSearch}>
+                  <Text style={sheetStyles.label}>Member *</Text>
                   {selectedMember ? (
                     <View style={sheetStyles.selectedMemberRow}>
                       <View style={sheetStyles.memberAvatar}>
@@ -187,13 +197,13 @@ function SendNotificationSheet({
               )}
 
               {/* Title */}
-              <Text style={sheetStyles.label}>Delivery channels</Text>
+              <Text style={sheetStyles.label}>Delivery channels *</Text>
               <View style={sheetStyles.channelRow}>
                 {[{ label: 'In-app', value: inApp, set: setInApp, icon: 'bell-outline' }, { label: 'Email', value: emailChannel, set: setEmailChannel, icon: 'email-outline' }, { label: 'SMS', value: smsChannel, set: setSmsChannel, icon: 'message-text-outline' }].map(channel => <TouchableOpacity key={channel.label} onPress={() => channel.set(!channel.value)} style={[sheetStyles.channelChip, channel.value && { borderColor: typeCfg.color, backgroundColor: `${typeCfg.color}18` }]}><Icon name={channel.value ? 'checkbox-marked' : channel.icon} size={18} color={channel.value ? typeCfg.color : Colors.textMuted} /><Text style={[sheetStyles.channelText, channel.value && { color: typeCfg.color }]}>{channel.label}</Text></TouchableOpacity>)}
               </View>
 
               {/* Title */}
-              <Text style={sheetStyles.label}>Title</Text>
+              <Text style={sheetStyles.label}>Title *</Text>
               <View style={[sheetStyles.inputWrapper, { borderColor: title ? typeCfg.color : Colors.borderDefault }]}>
                 <TextInput
                   style={sheetStyles.input}
@@ -207,7 +217,7 @@ function SendNotificationSheet({
               {emailChannel ? <><Text style={sheetStyles.label}>Email subject</Text><View style={sheetStyles.inputWrapper}><TextInput style={sheetStyles.input} value={emailSubject} onChangeText={setEmailSubject} placeholder="Optional email subject" placeholderTextColor={Colors.textMuted} /></View><Text style={sheetStyles.label}>Email HTML</Text><View style={sheetStyles.messageWrapper}><TextInput style={sheetStyles.messageInput} value={emailHtml} onChangeText={setEmailHtml} onFocus={revealBottomField} placeholder="Optional HTML email body" placeholderTextColor={Colors.textMuted} multiline /></View></> : null}
 
               {/* Message */}
-              <Text style={sheetStyles.label}>Message</Text>
+              <Text style={sheetStyles.label}>Message *</Text>
               <View style={[sheetStyles.messageWrapper, { borderColor: message ? typeCfg.color : Colors.borderDefault }]}>
                 <TextInput
                   style={sheetStyles.messageInput}
@@ -223,9 +233,11 @@ function SendNotificationSheet({
 
               {/* Send button */}
               <TouchableOpacity
-                onPress={handleSend}
-                disabled={!isValid || sending}
-                style={[sheetStyles.sendBtn, (!isValid || sending) && { opacity: 0.4 }, { backgroundColor: typeCfg.color }]}
+                onPress={() => missingNotificationFields.length
+                  ? Alert.alert('Mandatory fields missing', `Please complete: ${missingNotificationFields.join(', ')}.`)
+                  : handleSend()}
+                disabled={sending}
+                style={[sheetStyles.sendBtn, (missingNotificationFields.length > 0 || sending) && { opacity: 0.4 }, { backgroundColor: typeCfg.color }]}
                 activeOpacity={0.8}
               >
                 <Icon name={sending ? 'loading' : 'send'} size={18} color={Colors.white} />
@@ -266,6 +278,11 @@ function AddEventSheet({
   const isValid = eventName.trim().length > 0 && description.trim().length > 0 && categoryId.length > 0 &&
     (subcategories.length === 0 || subcategoryId.length > 0) && date.trim().length > 0 &&
     startTime.trim().length > 0 && endTime.trim().length > 0 && endTime > startTime;
+  const missingEventFields = [
+    !eventName.trim() && 'Event Name', !description.trim() && 'Description',
+    !categoryId && 'Category', subcategories.length > 0 && !subcategoryId && 'Subcategory',
+    !date && 'Date', !startTime && 'Start Time', !endTime && 'End Time',
+  ].filter((item): item is string => Boolean(item));
 
   const handleSave = async () => {
     if (!isValid) return;
@@ -320,7 +337,7 @@ function AddEventSheet({
               </View>
 
               {/* Description */}
-              <Text style={sheetStyles.label}>Description</Text>
+              <Text style={sheetStyles.label}>Description *</Text>
               <View style={sheetStyles.messageWrapper}>
                 <TextInput
                   style={sheetStyles.messageInput}
@@ -335,6 +352,7 @@ function AddEventSheet({
 
               <DropdownField
                 label="Category"
+                required
                 value={categoryId}
                 options={categories}
                 onChange={value => { setCategoryId(value); setSubcategoryId(''); }}
@@ -343,6 +361,7 @@ function AddEventSheet({
               />
               <DropdownField
                 label="Subcategory"
+                required={subcategories.length > 0}
                 value={subcategoryId}
                 options={subcategories}
                 onChange={setSubcategoryId}
@@ -370,7 +389,7 @@ function AddEventSheet({
                   <DropdownField label="Start Time" required value={startTime} options={EVENT_TIME_OPTIONS} onChange={setStartTime} placeholder="Select time" />
                 </View>
                 <View style={sheetStyles.timeField}>
-                  <DropdownField label="End Time" value={endTime} options={EVENT_TIME_OPTIONS} onChange={setEndTime} placeholder="Select time" />
+                  <DropdownField label="End Time" required value={endTime} options={EVENT_TIME_OPTIONS} onChange={setEndTime} placeholder="Select time" />
                 </View>
               </View>
 
@@ -405,8 +424,10 @@ function AddEventSheet({
 
               {/* Save button */}
               <TouchableOpacity
-                onPress={handleSave}
-                disabled={!isValid || saving}
+                onPress={() => missingEventFields.length
+                  ? Alert.alert('Mandatory fields missing', `Please complete: ${missingEventFields.join(', ')}.`)
+                  : handleSave()}
+                disabled={saving}
                 style={[sheetStyles.sendBtn, (!isValid || saving) && { opacity: 0.4 }]}
                 activeOpacity={0.8}
               >
@@ -425,11 +446,18 @@ function AddEventSheet({
 interface StatCardProps {
   label: string; value: string | number;
   sub?: string; accent: string; icon: string;
+  onPress: () => void;
 }
 
-function StatCard({ label, value, sub, accent, icon }: StatCardProps) {
+function StatCard({ label, value, sub, accent, icon, onPress }: StatCardProps) {
   return (
-    <View style={styles.statCard}>
+    <TouchableOpacity
+      accessibilityRole="button"
+      accessibilityLabel={`${label}: ${value}`}
+      onPress={onPress}
+      activeOpacity={0.72}
+      style={styles.statCard}
+    >
       <View style={styles.statTop}>
         <View style={[styles.statIconBox, { backgroundColor: `${accent}22` }]}>
           <Icon name={icon} size={20} color={accent} />
@@ -438,7 +466,8 @@ function StatCard({ label, value, sub, accent, icon }: StatCardProps) {
       </View>
       <Text style={styles.statLabel}>{label}</Text>
       {sub && <Text style={styles.statSub}>{sub}</Text>}
-    </View>
+      <Icon name="chevron-right" size={16} color={Colors.textMuted} style={styles.statChevron} />
+    </TouchableOpacity>
   );
 }
 
@@ -577,12 +606,12 @@ export function HomeScreen() {
             {/* Today's Overview */}
             <SectionTitle title="Today's Overview" />
             <View style={styles.statsGrid}>
-              <StatCard label="Tickets Raised" value={ticketsRaised} sub={`${urgentTickets} urgent`} accent={Colors.alert} icon="ticket-outline" />
-              <StatCard label="Tickets Solved" value={ticketsSolved} sub={`${ticketsRaised ? Math.round((ticketsSolved / ticketsRaised) * 100) : 0}% resolved`} accent={Colors.success} icon="ticket-confirmation-outline" />
-              <StatCard label="Day Pass Users" value={dayPassUsers} sub={`${checkedInPasses} checked in`} accent={Colors.accent300} icon="badge-account-outline" />
-              <StatCard label="Visitors Today" value={visitorsToday} sub={`${pendingVisitors} pending`} accent="#30BCED" icon="account-arrow-right-outline" />
-              <StatCard label="Room Bookings" value={roomBookingsToday} sub={`${confirmedBookings} confirmed`} accent={Colors.accent200} icon="door-open" />
-              <StatCard label="Active Events" value={activeEventCount} sub={connection === 'online' ? 'Live data' : 'Offline data'} accent="#A78BFA" icon="calendar-star" />
+              <StatCard label="Tickets Raised" value={ticketsRaised} sub={`${urgentTickets} urgent`} accent={Colors.alert} icon="ticket-outline" onPress={() => navigation.navigate('AllTicketsScreen')} />
+              <StatCard label="Tickets Solved" value={ticketsSolved} sub={`${ticketsRaised ? Math.round((ticketsSolved / ticketsRaised) * 100) : 0}% resolved`} accent={Colors.success} icon="ticket-confirmation-outline" onPress={() => navigation.navigate('AllTicketsScreen')} />
+              <StatCard label="Day Pass Users" value={dayPassUsers} sub={`${checkedInPasses} checked in`} accent={Colors.accent300} icon="badge-account-outline" onPress={() => navigation.navigate('AllDayPassesScreen')} />
+              <StatCard label="Visitors Today" value={visitorsToday} sub={`${pendingVisitors} pending`} accent="#30BCED" icon="account-arrow-right-outline" onPress={() => navigation.navigate('ViewGuestsScreen')} />
+              <StatCard label="Room Bookings" value={roomBookingsToday} sub={`${confirmedBookings} confirmed`} accent={Colors.accent200} icon="door-open" onPress={() => navigation.navigate('AllRoomBookingsScreen')} />
+              <StatCard label="Active Events" value={activeEventCount} sub={connection === 'online' ? 'Live data' : 'Offline data'} accent="#A78BFA" icon="calendar-star" onPress={() => navigation.navigate('EventsScreen')} />
             </View>
 
             {/* Quick Actions */}
@@ -773,6 +802,7 @@ const styles = StyleSheet.create({
   statValue:   { fontFamily: 'SequelSans-SemiBoldHead', fontSize: 24, color: Colors.textPrimary },
   statLabel:   { fontFamily: 'SequelSans-SemiBoldBody', fontSize: 13, color: Colors.textPrimary },
   statSub:     { ...Typography.caption, color: Colors.textSecondary, marginTop: 2 },
+  statChevron: { position: 'absolute', right: Spacing.sm, bottom: Spacing.sm },
 
   actionsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm },
   actionBtn:   { flex: 1, minWidth: '30%', backgroundColor: Colors.cardSurface, borderRadius: BorderRadius.md, padding: Spacing.md, alignItems: 'center', borderWidth: 1, borderColor: Colors.borderDefault, gap: Spacing.sm },

@@ -50,11 +50,39 @@ describe('picked document uploads', () => {
     );
   });
 
-  it('uses an iOS file directly', async () => {
+  it('uses the supported multipart filename when copying a UUID-named file', async () => {
+    (Platform as { OS: string }).OS = 'android';
+    (keepLocalCopy as jest.Mock).mockResolvedValue([
+      {
+        status: 'success',
+        sourceUri: selectedFile.uri,
+        localUri: 'file:///app/cache/upload.pdf',
+      },
+    ]);
+
+    await expect(pickedAttachment({ ...selectedFile, name: 'uuid' }, 'upload.pdf'))
+      .resolves.toMatchObject({ name: 'upload.pdf' });
+    expect(keepLocalCopy).toHaveBeenCalledWith({
+      files: [{ uri: selectedFile.uri, fileName: 'upload.pdf' }],
+      destination: 'cachesDirectory',
+    });
+  });
+
+  it('moves an iOS picker file into app storage before uploading', async () => {
     (Platform as { OS: string }).OS = 'ios';
+    (keepLocalCopy as jest.Mock).mockResolvedValue([
+      {
+        status: 'success',
+        sourceUri: 'file:///app/tmp/Inbox/request.pdf',
+        localUri: 'file:///app/cache/request.pdf',
+      },
+    ]);
     await expect(
-      pickedAttachment({ ...selectedFile, uri: 'file:///app/request.pdf' }),
-    ).resolves.toMatchObject({ uri: 'file:///app/request.pdf' });
-    expect(keepLocalCopy).not.toHaveBeenCalled();
+      pickedAttachment({ ...selectedFile, uri: 'file:///app/tmp/Inbox/request.pdf' }),
+    ).resolves.toMatchObject({ uri: 'file:///app/cache/request.pdf' });
+    expect(keepLocalCopy).toHaveBeenCalledWith({
+      files: [{ uri: 'file:///app/tmp/Inbox/request.pdf', fileName: 'request.pdf' }],
+      destination: 'cachesDirectory',
+    });
   });
 });

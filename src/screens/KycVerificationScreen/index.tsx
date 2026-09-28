@@ -126,7 +126,7 @@ export function KycVerificationScreen() {
   };
 
   const handleSubmit = async () => {
-    if (!isComplete) return;
+    if (!isComplete) return Alert.alert('Mandatory fields missing', 'Upload both Aadhaar images, enter the 12-digit number, and complete both confirmations.');
     setSubmitting(true);
     try {
       if (!matchingLead) throw new Error('No OD lead is linked to this phone number, so KYC cannot be submitted safely.');
@@ -219,10 +219,10 @@ export function KycVerificationScreen() {
         </View>
 
         {/* Aadhaar Upload */}
-        <Text style={styles.sectionLabel}>Aadhaar Card</Text>
+        <Text style={styles.sectionLabel}>Aadhaar Card *</Text>
         <View style={styles.uploadRow}>
           <UploadBox
-            label="Front Side"
+            label="Front Side *"
             sublabel="Photo of front"
             icon="card-account-details-outline"
             file={aadhaarFront}
@@ -230,7 +230,7 @@ export function KycVerificationScreen() {
             onRemove={() => setAadhaarFront(null)}
           />
           <UploadBox
-            label="Back Side"
+            label="Back Side *"
             sublabel="Photo of back"
             icon="card-bulleted-outline"
             file={aadhaarBack}
@@ -240,7 +240,7 @@ export function KycVerificationScreen() {
         </View>
 
         {/* Aadhaar Number */}
-        <Text style={styles.sectionLabel}>Aadhaar Number</Text>
+        <Text style={styles.sectionLabel}>Aadhaar Number *</Text>
         <View style={styles.card}>
           <View style={[
             styles.inputWrapper,
@@ -268,7 +268,7 @@ export function KycVerificationScreen() {
         </View>
 
         {/* Verification Checkboxes */}
-        <Text style={styles.sectionLabel}>Verification Confirmation</Text>
+        <Text style={styles.sectionLabel}>Verification Confirmation *</Text>
         <View style={styles.card}>
           <TouchableOpacity
             onPress={() => setNameVerified(p => !p)}
@@ -279,7 +279,7 @@ export function KycVerificationScreen() {
               {nameVerified && <Icon name="check" size={12} color={Colors.white} />}
             </View>
             <View style={styles.checkTextCol}>
-              <Text style={styles.checkLabel}>Name matches Aadhaar</Text>
+              <Text style={styles.checkLabel}>Name matches Aadhaar *</Text>
               <Text style={styles.checkDesc}>
                 The name on the Aadhaar card matches the member's registered name.
               </Text>
@@ -297,7 +297,7 @@ export function KycVerificationScreen() {
               {personVerified && <Icon name="check" size={12} color={Colors.white} />}
             </View>
             <View style={styles.checkTextCol}>
-              <Text style={styles.checkLabel}>Person is physically present</Text>
+              <Text style={styles.checkLabel}>Person is physically present *</Text>
               <Text style={styles.checkDesc}>
                 The person standing in front of you matches the photo on the Aadhaar card.
               </Text>
@@ -321,7 +321,7 @@ export function KycVerificationScreen() {
 
         <TouchableOpacity
           onPress={handleSubmit}
-          disabled={!isComplete || submitting}
+          disabled={submitting}
           style={[styles.submitBtn, (!isComplete || submitting) && { opacity: 0.4 }]}
           activeOpacity={0.8}
         >

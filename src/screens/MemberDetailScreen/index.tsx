@@ -103,7 +103,7 @@ function DirectNotificationModal({
               <Text style={modalStyles.title}>Send Notification</Text>
               <Text style={modalStyles.subtitle}>to {memberName}</Text>
 
-              <Text style={modalStyles.label}>Title</Text>
+              <Text style={modalStyles.label}>Title *</Text>
               <View style={modalStyles.inputWrapper}>
                 <TextInput
                   style={modalStyles.input}
@@ -114,7 +114,7 @@ function DirectNotificationModal({
                 />
               </View>
 
-              <Text style={modalStyles.label}>Message</Text>
+              <Text style={modalStyles.label}>Message *</Text>
               <View style={modalStyles.messageWrapper}>
                 <TextInput
                   style={modalStyles.messageInput}
@@ -128,8 +128,10 @@ function DirectNotificationModal({
               </View>
 
               <TouchableOpacity
-                onPress={handleSend}
-                disabled={!title.trim() || !message.trim() || sending}
+                onPress={() => !title.trim() || !message.trim()
+                  ? Alert.alert('Mandatory fields missing', 'Enter a title and message.')
+                  : handleSend()}
+                disabled={sending}
                 style={[modalStyles.sendBtn, (!title.trim() || !message.trim() || sending) && { opacity: 0.4 }]}
                 activeOpacity={0.8}
               >

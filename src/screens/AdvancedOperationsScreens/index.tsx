@@ -7,7 +7,7 @@ import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import { errorCodes, isErrorWithCode, pick, types, type DocumentPickerResponse } from '@react-native-documents/picker';
+import { errorCodes, isErrorWithCode, pick, types } from '@react-native-documents/picker';
 import { RootStackParamList } from '../../navigation/MainStackNavigator';
 import { useApp } from '../../context/AppContext';
 import { apiClient } from '../../services/apiClient';
@@ -17,6 +17,11 @@ import { FileAttachment } from '../../types/domain';
 import { DropdownField, DropdownOption } from '../../components/molecules/DropdownField';
 import { downloadAuthenticatedFile } from '../../utils/downloadFile';
 import { KeyboardSafeScrollView } from '../../components/molecules/KeyboardSafeScrollView';
+import { pickedAttachment } from '../../utils/pickedAttachment';
+import {
+  leadBillingAddress, leadDocumentIdentity, leadDocumentsFromRecord, unwrapLead,
+} from '../../utils/leadData';
+import { GST_TREATMENT_OPTIONS, LEAD_GENDER_OPTIONS, stateName } from '../../utils/leadOptions';
 import {
   formatRecordLabel,
   formatRecordValue,
@@ -58,6 +63,12 @@ const recordName = (value: unknown, fallback = 'Record') => {
   const combined = [record.firstName, record.lastName].map(valueText).filter(Boolean).join(' ');
   return valueText(record.name || record.displayName || record.companyName || record.legalName || record.title || record.label || record.cabinNumber || record.roomName || record.areaName || record.number) || combined || fallback;
 };
+const leadName = (value: unknown) => {
+  const record = asRecord(value);
+  return valueText(record.fullName || record.name) ||
+    [record.firstName, record.lastName].map(valueText).filter(Boolean).join(' ') ||
+    recordName(record, '');
+};
 const showError = (title: string, error: unknown) => Alert.alert(title, error instanceof Error ? error.message : 'Please try again.');
 const prettyKey = formatRecordLabel;
 const displayRows = (record: AnyRecord) => Object.entries(record).filter(([key, value]) => {
@@ -84,12 +95,12 @@ function Page({ title, subtitle, children, action }: { title: string; subtitle?:
   </View>;
 }
 
-function Field({ label, value, onChangeText, placeholder, multiline, keyboardType }: { label: string; value: string; onChangeText(value: string): void; placeholder?: string; multiline?: boolean; keyboardType?: 'default' | 'number-pad' | 'decimal-pad' | 'email-address' | 'phone-pad' }) {
-  return <View style={s.field}><Text style={s.label}>{label}</Text><TextInput value={value} onChangeText={onChangeText} placeholder={placeholder} placeholderTextColor={Colors.textMuted} multiline={multiline} keyboardType={keyboardType} style={[s.input, multiline && s.multiline]} /></View>;
+function Field({ label, required = false, value, onChangeText, placeholder, multiline, keyboardType }: { label: string; required?: boolean; value: string; onChangeText(value: string): void; placeholder?: string; multiline?: boolean; keyboardType?: 'default' | 'number-pad' | 'decimal-pad' | 'email-address' | 'phone-pad' }) {
+  return <View style={s.field}><Text style={s.label}>{label}{required ? ' *' : ''}</Text><TextInput value={value} onChangeText={onChangeText} placeholder={placeholder} placeholderTextColor={Colors.textMuted} multiline={multiline} keyboardType={keyboardType} style={[s.input, multiline && s.multiline]} /></View>;
 }
 
-function Button({ label, onPress, secondary, destructive, disabled }: { label: string; onPress(): void; secondary?: boolean; destructive?: boolean; disabled?: boolean }) {
-  return <TouchableOpacity disabled={disabled} onPress={onPress} style={[s.button, secondary && s.buttonSecondary, destructive && s.buttonDestructive, disabled && s.disabled]}><Text style={[s.buttonText, secondary && s.buttonTextSecondary]}>{label}</Text></TouchableOpacity>;
+function Button({ label, onPress, secondary, destructive, disabled, missingFields = [] }: { label: string; onPress(): void; secondary?: boolean; destructive?: boolean; disabled?: boolean; missingFields?: string[] }) {
+  return <TouchableOpacity disabled={disabled} onPress={() => missingFields.length ? Alert.alert('Mandatory fields missing', `Please complete: ${missingFields.join(', ')}.`) : onPress()} style={[s.button, secondary && s.buttonSecondary, destructive && s.buttonDestructive, (disabled || missingFields.length > 0) && s.disabled]}><Text style={[s.buttonText, secondary && s.buttonTextSecondary]}>{label}</Text></TouchableOpacity>;
 }
 
 function RecordDetails({ record }: { record: AnyRecord }) {
@@ -127,13 +138,59 @@ function RecordDetails({ record }: { record: AnyRecord }) {
   return <View style={s.card}>{rows.filter(([key, value]) => { const label = prettyKey(key); if (seen.has(label) || !formatRecordValue(key, value)) return false; seen.add(label); return true; }).slice(0, 24).map(([key, value]) => { const imageValue = Array.isArray(value) ? value.find(item => typeof item === 'string') : value; return <View key={key} style={s.detailRow}><Text style={s.detailLabel}>{prettyKey(key)}</Text>{isImageRecordValue(key, value) ? <Image source={{ uri: imageValue as string }} resizeMode="cover" style={s.detailImage} /> : <Text style={s.detailValue}>{formatRecordValue(key, value)}</Text>}</View>; })}</View>;
 }
 
+function LeadInformation({ lead }: { lead: AnyRecord }) {
+  const billing = leadBillingAddress(lead);
+  const name = leadName(lead) || '—';
+  const gstTreatment = valueText(lead.gstTreatment);
+  const formattedTreatment = GST_TREATMENT_OPTIONS.find(option => option.value === gstTreatment)?.label || gstTreatment;
+  const gender = valueText(lead.gender);
+  const formattedGender = LEAD_GENDER_OPTIONS.find(option => option.value === gender)?.label || gender;
+  const building = valueText(lead.building || lead.buildingName);
+  const basicRows: Array<[string, string]> = [
+    ['Full name', name],
+    ['Gender', formattedGender],
+    ['Company', valueText(lead.companyName || lead.company)],
+    ['Email', valueText(lead.email)],
+    ['Phone', valueText(lead.phone)],
+  ];
+  const billingRows: Array<[string, string]> = [
+    ['GSTIN', valueText(lead.gstNo || lead.gstin || lead.gstNumber)],
+    ['GST treatment', formattedTreatment],
+    ['Place of supply', stateName(valueText(lead.placeOfSupply))],
+    ['Billing address', billing.address],
+    ['City', billing.city],
+    ['State', billing.state || stateName(billing.stateCode)],
+    ['Pincode', billing.zip],
+    ['Country', billing.country],
+  ];
+  const identityRows: Array<[string, string]> = [
+    ['Building', building],
+    ['Lead status', formatRecordValue('status', lead.status)],
+    ['Linked user', lead.userCreated ? name : ''],
+    ['Linked OD user', lead.guestId ? name : ''],
+    ['Zoho sync', formatRecordValue('zohoSyncStatus', lead.zohoSyncStatus)],
+    ['Created', formatRecordValue('createdAt', lead.createdAt)],
+  ];
+  const section = (title: string, rows: Array<[string, string]>) => (
+    <React.Fragment key={title}>
+      <Text style={s.section}>{title.toUpperCase()}</Text>
+      <View style={s.card}>{rows.map(([label, value]) => (
+        <View key={label} style={s.detailRow}>
+          <Text style={s.detailLabel}>{label}</Text>
+          <Text style={s.detailValue}>{value || '—'}</Text>
+        </View>
+      ))}</View>
+    </React.Fragment>
+  );
+  return <>{section('Basic information', basicRows)}{section('Billing information', billingRows)}{section('OD identity & ownership', identityRows)}</>;
+}
+
 function Loading() { return <View style={s.loading}><ActivityIndicator color={Colors.accent300} /><Text style={s.subtitle}>Loading…</Text></View>; }
 
-const toAttachment = (file: DocumentPickerResponse): FileAttachment => ({ uri: file.uri, name: file.name || 'document', type: file.type || 'application/octet-stream', size: file.size || undefined });
 async function chooseFile(allowed: any = types.allFiles) {
   try {
     const [file] = await pick({ type: allowed, allowMultiSelection: false });
-    return file ? toAttachment(file) : null;
+    return file ? await pickedAttachment(file) : null;
   } catch (error) {
     if (isErrorWithCode(error) && error.code === errorCodes.OPERATION_CANCELED) return null;
     throw error;
@@ -199,8 +256,19 @@ export function LeadDetailScreen() {
   const [lead, setLead] = useState<AnyRecord>(() => asRecord(leads.find(item => item.id === route.params.leadId)));
   const [file, setFile] = useState<FileAttachment | null>(null);
   const [reason, setReason] = useState('');
+  const [viewedDocumentIndexes, setViewedDocumentIndexes] = useState<number[]>([]);
   const [loading, setLoading] = useState(true);
-  const load = useCallback(async () => { setLoading(true); try { const incoming = unwrap(await apiClient.get(Routes.lead(route.params.leadId))); setLead(current => ({ ...current, ...incoming })); } catch (error) { showError('Lead unavailable', error); } finally { setLoading(false); } }, [route.params.leadId]);
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const incoming = unwrapLead(await apiClient.get(Routes.lead(route.params.leadId)));
+      setLead(current => ({ ...current, ...incoming }));
+    } catch (error) {
+      showError('Lead unavailable', error);
+    } finally {
+      setLoading(false);
+    }
+  }, [route.params.leadId]);
   useEffect(() => { load(); }, [load]);
   const upload = async () => {
     if (!file) return Alert.alert('Document required', 'Choose a JPG, PNG or PDF document.');
@@ -210,20 +278,41 @@ export function LeadDetailScreen() {
       await apiClient.put(Routes.leadKyc(route.params.leadId), form, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
-      const uploadedName = file.name;
       setFile(null);
+      setViewedDocumentIndexes([]);
       await load();
-      setLead(current => ({
-        ...current,
-        kycStatus: 'pending_review',
-        kycDocuments: [{ name: uploadedName }],
-      }));
       Alert.alert('Uploaded', 'The KYC document is ready for review.');
     } catch (error) { showError('Upload failed', error); }
   };
+  const openDocument = async (index: number) => {
+    try {
+      // KYC files are signed URLs that expire. Fetch a fresh lead immediately
+      // before opening so review does not depend on the screen's load time.
+      const freshLead = unwrapLead(await apiClient.get(Routes.lead(route.params.leadId)));
+      const documents = leadDocumentsFromRecord(freshLead);
+      const document = documents[index];
+      if (!document?.url) throw new Error('This document is not available for viewing.');
+      setLead(current => ({ ...current, ...freshLead }));
+      await downloadAuthenticatedFile(document.url, document.name, 'view');
+      setViewedDocumentIndexes(current => current.includes(index) ? current : [...current, index]);
+    } catch (error) {
+      showError('KYC document unavailable', error);
+    }
+  };
   const act = async (action: 'approve' | 'reject') => {
+    if (!allDocumentsViewed) return Alert.alert('Review required', 'Open each KYC document before deciding.');
     if (action === 'reject' && !reason.trim()) return Alert.alert('Reason required', 'Enter a rejection reason.');
     try {
+      const freshLead = unwrapLead(await apiClient.get(Routes.lead(route.params.leadId)));
+      const freshDocuments = leadDocumentsFromRecord(freshLead).filter(document => document.url);
+      if (!freshDocuments.length ||
+          freshDocuments.length !== viewableDocuments.length ||
+          freshDocuments.some((document, index) =>
+            leadDocumentIdentity(document.url || '') !== leadDocumentIdentity(viewableDocuments[index].url || ''))) {
+        setLead(current => ({ ...current, ...freshLead }));
+        setViewedDocumentIndexes([]);
+        return Alert.alert('Review required', 'The KYC documents changed. Open each document again before deciding.');
+      }
       await apiClient.post(
         action === 'approve'
           ? Routes.approveLeadKyc(route.params.leadId)
@@ -242,18 +331,44 @@ export function LeadDetailScreen() {
   };
   const kycStatus = valueText(lead.kycStatus || lead.status).toLowerCase();
   const reviewComplete = ['approved', 'rejected'].includes(kycStatus);
-  const hasDocument =
-    (Array.isArray(lead.kycDocuments) && lead.kycDocuments.length > 0) ||
-    ['pending', 'pending_review', 'under_review', 'approved'].includes(kycStatus);
-  const documents = Array.isArray(lead.kycDocuments) ? lead.kycDocuments : [];
-  const viewableDocuments = documents.map((entry, index) => {
-    const document = asRecord(entry);
-    return {
-      name: valueText(document.name || document.fileName) || `Document ${index + 1}`,
-      url: valueText(document.url || document.fileUrl || document.path || (typeof entry === 'string' ? entry : '')),
-    };
-  }).filter(document => document.url);
-  return <Page title="Lead Details" subtitle={recordName(lead, '') || undefined}>{loading ? <Loading /> : <><RecordDetails record={lead} /><Text style={s.section}>KYC DOCUMENT</Text>{hasDocument ? <View style={s.card}><Text style={s.cardTitle}>Document uploaded</Text><Text style={s.subtitle}>Status: {formatRecordValue('status', lead.kycStatus || 'Pending review')}</Text>{viewableDocuments.map((document, index) => <Button key={`${document.url}-${index}`} label={`View ${document.name}`} secondary onPress={() => downloadAuthenticatedFile(document.url, document.name).catch(error => showError('KYC document unavailable', error))} />)}{viewableDocuments.length === 0 ? <Text style={s.subtitle}>The service did not provide a document link for review.</Text> : null}</View> : <><TouchableOpacity onPress={async () => { try { setFile(await chooseFile([types.images, types.pdf])); } catch (error) { showError('File unavailable', error); } }} style={s.file}><Icon name="file-upload-outline" size={24} color={Colors.accent300} /><Text style={s.flexText}>{file?.name || 'Choose JPG, JPEG, PNG or PDF (max 5 MB)'}</Text></TouchableOpacity><Button label="Upload KYC Document" onPress={upload} disabled={!file} /></>}{hasDocument && !reviewComplete ? <><Field label="Rejection reason" value={reason} onChangeText={setReason} placeholder="Required only when rejecting" multiline /><View style={s.actions}><Button label="Approve KYC" onPress={() => act('approve')} disabled={!viewableDocuments.length} /><Button label="Reject KYC" onPress={() => act('reject')} destructive disabled={!viewableDocuments.length} /></View></> : null}{reviewComplete && kycStatus === 'rejected' ? <Button label="Upload replacement document" secondary onPress={() => setLead(current => ({ ...current, kycStatus: '', kycDocuments: [] }))} /> : null}</>}</Page>;
+  const documents = leadDocumentsFromRecord(lead);
+  const hasDocument = documents.length > 0;
+  const viewableDocuments = documents.filter(document => document.url);
+  const allDocumentsViewed = viewableDocuments.length > 0 &&
+    viewableDocuments.every((_, index) => viewedDocumentIndexes.includes(index));
+  return <Page title="Lead Details" subtitle={leadName(lead) || undefined}>
+    {loading ? <Loading /> : <>
+      <LeadInformation lead={lead} />
+      <Text style={s.section}>KYC VERIFICATION</Text>
+      <View style={s.card}>
+        <Text style={s.cardTitle}>{formatRecordValue('status', lead.kycStatus || 'Not submitted')}</Text>
+        {viewableDocuments.map((document, index) => (
+          <Button key={index} label={`View ${document.name}`} secondary onPress={() => openDocument(index)} />
+        ))}
+        {hasDocument && !viewableDocuments.length ? <Text style={s.subtitle}>The service did not provide a document link for review.</Text> : null}
+        {viewableDocuments.length > 0 && !allDocumentsViewed && !reviewComplete ? <Text style={s.subtitle}>Open each document before approving or rejecting KYC.</Text> : null}
+        {!hasDocument ? <Text style={s.subtitle}>No KYC documents have been submitted yet.</Text> : null}
+      </View>
+      {!hasDocument || (reviewComplete && kycStatus === 'rejected') ? <>
+        <Text style={s.label}>KYC document *</Text>
+        <TouchableOpacity onPress={async () => {
+          try { setFile(await chooseFile([types.images, types.pdf])); }
+          catch (error) { showError('File unavailable', error); }
+        }} style={s.file}>
+          <Icon name="file-upload-outline" size={24} color={Colors.accent300} />
+          <Text style={s.flexText}>{file?.name || 'Choose JPG, JPEG, PNG or PDF (max 5 MB)'}</Text>
+        </TouchableOpacity>
+        <Button label="Upload KYC Document" onPress={upload} missingFields={!file ? ['KYC document'] : []} />
+      </> : null}
+      {hasDocument && !reviewComplete ? <>
+        <Field label="Rejection reason" required value={reason} onChangeText={setReason} placeholder="Required when rejecting" multiline />
+        <View style={s.actions}>
+          <Button label="Approve KYC" onPress={() => act('approve')} disabled={!allDocumentsViewed} />
+          <Button label="Reject KYC" onPress={() => act('reject')} destructive disabled={!allDocumentsViewed} missingFields={!reason.trim() ? ['Rejection reason'] : []} />
+        </View>
+      </> : null}
+    </>}
+  </Page>;
 }
 
 export function OnDemandUserDetailScreen() {
@@ -302,7 +417,7 @@ export function InventoryImportsScreen() {
     try { const form = new FormData(); appendFile(form, 'file', file); const response = await apiClient.post<AnyRecord>(Routes.inventoryImport(kind), form, { headers: { 'Content-Type': 'multipart/form-data' }, params: { dryRun } }); setPreview(unwrap(response)); if (!dryRun) { setFile(null); setPreview({}); await syncAll(); Alert.alert('Import complete', `${labels[kind]} were imported.`); } } catch (error) { showError(dryRun ? 'Preview failed' : 'Import failed', error); } finally { setSaving(false); }
   };
   const downloadSample = async () => { setDownloading(true); try { await downloadAuthenticatedFile(Routes.inventoryImportSample(kind), `${kind}-sample.csv`); } catch (error) { showError('Download failed', error); } finally { setDownloading(false); } };
-  return <Page title="Inventory Imports" subtitle="Validate before committing"><DropdownField label="Inventory type" value={kind} options={(Object.keys(labels) as InventoryKind[]).map(value => ({ value, label: labels[value] }))} onChange={value => { setKind(value as InventoryKind); setFile(null); setPreview({}); }} /><TouchableOpacity onPress={async () => { try { setFile(await chooseFile()); } catch (error) { showError('File unavailable', error); } }} style={s.file}><Icon name="file-upload-outline" size={24} color={Colors.accent300} /><Text style={s.flexText}>{file?.name || 'Choose CSV or Excel file'}</Text></TouchableOpacity><View style={s.actions}><Button label={downloading ? 'Preparing…' : 'Download Sample'} secondary onPress={downloadSample} disabled={downloading} /><Button label="Validate" onPress={() => upload(true)} disabled={!file || saving} /></View>{Object.keys(preview).length ? <><Text style={s.section}>VALIDATION PREVIEW</Text><RecordDetails record={preview} /><Button label="Commit Import" onPress={() => upload(false)} disabled={saving} /></> : null}</Page>;
+  return <Page title="Inventory Imports" subtitle="Validate before committing"><DropdownField label="Inventory type" required value={kind} options={(Object.keys(labels) as InventoryKind[]).map(value => ({ value, label: labels[value] }))} onChange={value => { setKind(value as InventoryKind); setFile(null); setPreview({}); }} /><Text style={s.label}>Import file *</Text><TouchableOpacity onPress={async () => { try { setFile(await chooseFile()); } catch (error) { showError('File unavailable', error); } }} style={s.file}><Icon name="file-upload-outline" size={24} color={Colors.accent300} /><Text style={s.flexText}>{file?.name || 'Choose CSV or Excel file'}</Text></TouchableOpacity><View style={s.actions}><Button label={downloading ? 'Preparing…' : 'Download Sample'} secondary onPress={downloadSample} disabled={downloading} /><Button label="Validate" onPress={() => upload(true)} disabled={saving} missingFields={!file ? ['Import file'] : []} /></View>{Object.keys(preview).length ? <><Text style={s.section}>VALIDATION PREVIEW</Text><RecordDetails record={preview} /><Button label="Commit Import" onPress={() => upload(false)} disabled={saving} /></> : null}</Page>;
 }
 
 export function MeetingBookingDetailScreen() {
@@ -321,7 +436,7 @@ export function MeetingBookingDetailScreen() {
     if (!cardId || !accessPhone) return Alert.alert('Details required', 'Select a card and a booking person with a phone number.');
     try { const matrix = unwrap(await apiClient.get(Routes.matrixUserByPhone, { phone: accessPhone })); const matrixId = recordId(matrix.user || matrix); if (!matrixId) throw new Error('No Matrix user was found.'); await apiClient.post(Routes.setMatrixCard(matrixId), { rfidCardId: cardId, meetingBookingId: booking.id }); Alert.alert('Access card assigned'); } catch (error) { showError('Card not assigned', error); }
   };
-  return <Page title="Booking Details" subtitle={`${booking.room} · ${formatRecordValue('date', booking.date)}`}><RecordDetails record={asRecord(booking)} />{Object.keys(credits).length ? <><Text style={s.section}>CREDIT SUMMARY</Text><RecordDetails record={credits} /></> : null}<Text style={s.section}>VISITORS & ACCESS</Text><DropdownField label="Visitor" value={visitorId} options={visitorOptions} onChange={setVisitorId} placeholder="Select an invited visitor" searchable /><Button label="Add Visitor" onPress={addVisitor} disabled={!visitorId} /><DropdownField label="Access card" value={cardId} options={cardOptions} onChange={setCardId} placeholder="Select an available card" searchable /><View style={s.actions}><Button label="Assign Card" secondary onPress={issueCard} disabled={!cardId || !accessPhone} /><Button label="Provision Access" onPress={provision} /></View></Page>;
+  return <Page title="Booking Details" subtitle={`${booking.room} · ${formatRecordValue('date', booking.date)}`}><RecordDetails record={asRecord(booking)} />{Object.keys(credits).length ? <><Text style={s.section}>CREDIT SUMMARY</Text><RecordDetails record={credits} /></> : null}<Text style={s.section}>VISITORS & ACCESS</Text><DropdownField label="Visitor" required value={visitorId} options={visitorOptions} onChange={setVisitorId} placeholder="Select an invited visitor" searchable /><Button label="Add Visitor" onPress={addVisitor} missingFields={!visitorId ? ['Visitor'] : []} /><DropdownField label="Access card" required value={cardId} options={cardOptions} onChange={setCardId} placeholder="Select an available card" searchable /><View style={s.actions}><Button label="Assign Card" secondary onPress={issueCard} missingFields={[!cardId && 'Access card', !accessPhone && 'Booking person phone'].filter((item): item is string => Boolean(item))} /><Button label="Provision Access" onPress={provision} /></View></Page>;
 }
 
 type Invoice = AnyRecord & { _rowId?: string };
@@ -333,7 +448,7 @@ export function InvoicesScreen() {
   const push = async (invoice: Invoice, sendStatus: 'draft' | 'sent') => { try { await apiClient.post(Routes.invoicePushZoho(recordId(invoice)), { sendStatus }); Alert.alert(sendStatus === 'sent' ? 'Invoice sent through Zoho' : 'Invoice pushed to Zoho as draft'); await load(); } catch (error) { showError('Zoho action failed', error); } };
   const paymentLink = async (invoice: Invoice) => { try { const response = unwrap(await apiClient.post<AnyRecord>(Routes.razorpayCreatePaymentLink, { invoiceId: recordId(invoice) })); const url = valueText(response.short_url || response.shortUrl || response.url); if (!url) throw new Error('The payment service did not return a payment URL.'); navigation.navigate('PaymentWebViewScreen', { url, title: 'Invoice Payment', context: { invoiceId: recordId(invoice) } }); } catch (error) { showError('Payment link failed', error); } };
   const recordPayment = async () => { if (!selected || !clientId || Number(amount) <= 0) return Alert.alert('Details required', 'Select a client, invoice and positive amount.'); try { await apiClient.post(Routes.zohoCustomerPayment, { clientId, payment_mode: 'BankTransfer', amount: Number(amount), date: new Date().toISOString().slice(0, 10), reference_number: reference.trim(), description: description.trim(), invoices: [{ invoiceId: recordId(selected), amount_applied: Number(amount) }] }); setSelected(null); Alert.alert('Payment recorded'); await load(); } catch (error) { showError('Payment not recorded', error); } };
-  return <Page title="Invoices" subtitle={`${invoices.length} records`}><DropdownField label="Client" value={clientId} options={companies.map(item => ({ value: item.id, label: item.name }))} onChange={setClientId} placeholder="All clients" searchable />{loading ? <Loading /> : invoices.map((invoice, index) => { const status = valueText(invoice.status); const paid = status.toLowerCase() === 'paid'; const amountLabel = formatRecordValue('amount', invoice.total || invoice.amount || invoice.balance); return <View key={recordId(invoice) || String(index)} style={s.card}><Text style={s.cardTitle}>{recordName(invoice, `Invoice ${index + 1}`)}</Text><Text style={s.subtitle}>{[formatRecordValue('status', status), amountLabel].filter(Boolean).join(' · ')}</Text><View style={s.actions}>{!paid ? <Button label="Payment Link" secondary onPress={() => paymentLink(invoice)} /> : null}<Button label="Upload E-Invoice" secondary onPress={() => upload(invoice)} /><Button label="Zoho Draft" secondary onPress={() => push(invoice, 'draft')} /><Button label="Send via Zoho" onPress={() => push(invoice, 'sent')} />{!paid ? <Button label="Record Payment" onPress={() => { setSelected(invoice); setAmount(valueText(invoice.balance || invoice.amount)); }} /> : null}</View></View>; })}<Modal visible={Boolean(selected)} transparent animationType="slide" onRequestClose={() => setSelected(null)}><KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={s.overlay}><View style={s.modal}><Text style={s.title}>Record Payment</Text><Field label="Amount" value={amount} onChangeText={setAmount} keyboardType="decimal-pad" /><Field label="Reference number" value={reference} onChangeText={setReference} /><Field label="Description" value={description} onChangeText={setDescription} multiline /><View style={s.actions}><Button label="Cancel" secondary onPress={() => setSelected(null)} /><Button label="Save Payment" onPress={recordPayment} /></View></View></KeyboardAvoidingView></Modal></Page>;
+  return <Page title="Invoices" subtitle={`${invoices.length} records`}><DropdownField label="Client" value={clientId} options={companies.map(item => ({ value: item.id, label: item.name }))} onChange={setClientId} placeholder="All clients" searchable />{loading ? <Loading /> : invoices.map((invoice, index) => { const status = valueText(invoice.status); const paid = status.toLowerCase() === 'paid'; const amountLabel = formatRecordValue('amount', invoice.total || invoice.amount || invoice.balance); return <View key={recordId(invoice) || String(index)} style={s.card}><Text style={s.cardTitle}>{recordName(invoice, `Invoice ${index + 1}`)}</Text><Text style={s.subtitle}>{[formatRecordValue('status', status), amountLabel].filter(Boolean).join(' · ')}</Text><View style={s.actions}>{!paid ? <Button label="Payment Link" secondary onPress={() => paymentLink(invoice)} /> : null}<Button label="Upload E-Invoice" secondary onPress={() => upload(invoice)} /><Button label="Zoho Draft" secondary onPress={() => push(invoice, 'draft')} /><Button label="Send via Zoho" onPress={() => push(invoice, 'sent')} />{!paid ? <Button label="Record Payment" onPress={() => { setSelected(invoice); setAmount(valueText(invoice.balance || invoice.amount)); }} /> : null}</View></View>; })}<Modal visible={Boolean(selected)} transparent animationType="slide" onRequestClose={() => setSelected(null)}><KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={s.overlay}><View style={s.modal}><Text style={s.title}>Record Payment</Text><DropdownField label="Client" required value={clientId} options={companies.map(item => ({ value: item.id, label: item.name }))} onChange={setClientId} placeholder="Select client" searchable /><Field label="Amount" required value={amount} onChangeText={setAmount} keyboardType="decimal-pad" /><Field label="Reference number" value={reference} onChangeText={setReference} /><Field label="Description" value={description} onChangeText={setDescription} multiline /><View style={s.actions}><Button label="Cancel" secondary onPress={() => setSelected(null)} /><Button label="Save Payment" onPress={recordPayment} missingFields={[!clientId && 'Client', !(Number(amount) > 0) && 'Amount'].filter((item): item is string => Boolean(item))} /></View></View></KeyboardAvoidingView></Modal></Page>;
 }
 
 export function ExtendedHoursScreen() {
@@ -370,14 +485,14 @@ export function ExtendedHoursScreen() {
       setSubmitting(false);
     }
   };
-  return <Page title="Extended Hours" subtitle="Submit a request for admin review"><DropdownField label="Client" value={clientId} options={companies.map(item => ({ value: item.id, label: item.name }))} onChange={setClientId} placeholder="Select client" searchable /><Field label="Service date" value={date} onChangeText={setDate} placeholder="YYYY-MM-DD" /><View style={s.actions}><View style={s.flex}><Field label="Start" value={start} onChangeText={setStart} /></View><View style={s.flex}><Field label="End" value={end} onChangeText={setEnd} /></View></View><Field label="Notes" value={notes} onChangeText={setNotes} multiline /><Button label={submitting ? 'Submitting…' : 'Submit Request'} onPress={submit} disabled={!clientId || submitting} /></Page>;
+  return <Page title="Extended Hours" subtitle="Submit a request for admin review"><DropdownField label="Client" required value={clientId} options={companies.map(item => ({ value: item.id, label: item.name }))} onChange={setClientId} placeholder="Select client" searchable /><Field label="Service date" required value={date} onChangeText={setDate} placeholder="YYYY-MM-DD" /><View style={s.actions}><View style={s.flex}><Field label="Start" required value={start} onChangeText={setStart} /></View><View style={s.flex}><Field label="End" required value={end} onChangeText={setEnd} /></View></View><Field label="Notes" value={notes} onChangeText={setNotes} multiline /><Button label={submitting ? 'Submitting…' : 'Submit Request'} onPress={submit} disabled={submitting} missingFields={[!clientId && 'Client', !date && 'Service date', !start && 'Start', !end && 'End'].filter((item): item is string => Boolean(item))} /></Page>;
 }
 
 export function CabinBlockingScreen() {
   const { user } = useApp(); const [cabins, setCabins] = useState<AnyRecord[]>([]); const [cabinId, setCabinId] = useState(''); const [startDate, setStartDate] = useState(new Date().toISOString().slice(0, 10)); const [endDate, setEndDate] = useState(new Date().toISOString().slice(0, 10)); const [reason, setReason] = useState('Maintenance');
   useEffect(() => { if (!user?.buildingId) return; apiClient.get(Routes.blockableCabins, { building: user.buildingId }).then(value => setCabins(listFrom(value, ['cabins']))).catch(error => showError('Cabins unavailable', error)); }, [user?.buildingId]);
   const block = async () => { if (!cabinId || !startDate || !endDate || !reason.trim()) return Alert.alert('Details required', 'Choose a cabin, date range and reason.'); if (endDate < startDate) return Alert.alert('Invalid dates', 'End date must be on or after start date.'); try { await apiClient.post(Routes.blockCabin(cabinId), { startDate, endDate, reason: reason.trim() }); Alert.alert('Cabin blocked', 'The date-based block was saved.'); } catch (error) { showError('Cabin not blocked', error); } };
-  return <Page title="Block Cabin" subtitle={user?.buildingName}><DropdownField label="Cabin" value={cabinId} options={cabins.map(item => ({ value: recordId(item), label: recordName(item, valueText(item.cabinNumber || item.code)) }))} onChange={setCabinId} placeholder="Select cabin" searchable /><Field label="Start date" value={startDate} onChangeText={setStartDate} placeholder="YYYY-MM-DD" /><Field label="End date" value={endDate} onChangeText={setEndDate} placeholder="YYYY-MM-DD" /><Field label="Reason" value={reason} onChangeText={setReason} multiline /><Button label="Block Cabin" onPress={block} destructive /></Page>;
+  return <Page title="Block Cabin" subtitle={user?.buildingName}><DropdownField label="Cabin" required value={cabinId} options={cabins.map(item => ({ value: recordId(item), label: recordName(item, valueText(item.cabinNumber || item.code)) }))} onChange={setCabinId} placeholder="Select cabin" searchable /><Field label="Start date" required value={startDate} onChangeText={setStartDate} placeholder="YYYY-MM-DD" /><Field label="End date" required value={endDate} onChangeText={setEndDate} placeholder="YYYY-MM-DD" /><Field label="Reason" required value={reason} onChangeText={setReason} multiline /><Button label="Block Cabin" onPress={block} destructive missingFields={[!cabinId && 'Cabin', !startDate && 'Start date', !endDate && 'End date', !reason.trim() && 'Reason'].filter((item): item is string => Boolean(item))} /></Page>;
 }
 
 const s = StyleSheet.create({

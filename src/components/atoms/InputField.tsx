@@ -7,6 +7,7 @@ import { Colors, Typography, BorderRadius, Spacing } from '../../theme';
 
 interface Props extends TextInputProps {
   label?: string;
+  required?: boolean;
   error?: string;
   hint?: string;
   leftIcon?: React.ReactNode;
@@ -17,7 +18,7 @@ interface Props extends TextInputProps {
 }
 
 export const InputField: React.FC<Props> = ({
-  label, error, hint, leftIcon, rightIcon,
+  label, required = false, error, hint, leftIcon, rightIcon,
   onRightIconPress, containerStyle, inputStyle, ...inputProps
 }) => {
   const [isFocused, setIsFocused] = useState(false);
@@ -29,7 +30,7 @@ export const InputField: React.FC<Props> = ({
 
   return (
     <View style={[styles.container, containerStyle]}>
-      {label && <Text style={styles.label}>{label}</Text>}
+      {label && <Text style={styles.label}>{label}{required ? ' *' : ''}</Text>}
       <View style={[
         styles.wrapper,
         { borderColor },
