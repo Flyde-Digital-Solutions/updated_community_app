@@ -56,6 +56,8 @@ function SendNotificationSheet({
   const [inApp,         setInApp]         = useState(true);
   const [emailChannel,  setEmailChannel]  = useState(false);
   const [smsChannel,    setSmsChannel]    = useState(false);
+  const [pushChannel,   setPushChannel]   = useState(false);
+  const [queuedSummary, setQueuedSummary] = useState('');
   const [emailSubject,  setEmailSubject]  = useState('');
   const [emailHtml,     setEmailHtml]     = useState('');
   const formScrollRef = useRef<ScrollView>(null);
@@ -65,31 +67,37 @@ function SendNotificationSheet({
     m.name.toLowerCase().includes(memberSearch.toLowerCase())
   );
 
-  const isValid = title.trim().length > 0 && message.trim().length > 0 && (inApp || emailChannel || smsChannel) &&
+  const isValid = title.trim().length > 0 && message.trim().length > 0 && (inApp || emailChannel || smsChannel || pushChannel) &&
     (audience !== 'Specific Member' || !!selectedMember) && (audience !== 'Specific Cabin' || !!selectedCabin);
   const missingNotificationFields = [
     !title.trim() && 'Title', !message.trim() && 'Message',
     audience === 'Specific Member' && !selectedMember && 'Member',
     audience === 'Specific Cabin' && !selectedCabin && 'Cabin',
-    !(inApp || emailChannel || smsChannel) && 'Delivery channel',
+    !(inApp || emailChannel || smsChannel || pushChannel) && 'Delivery channel',
   ].filter((item): item is string => Boolean(item));
 
   const handleSend = async () => {
     if (!isValid) return;
     setSending(true);
     try {
-      await sendNotification({
+      const result = await sendNotification({
         type, title: title.trim(), message: message.trim(),
         audience: audience === 'Specific Member' ? selectedMember?.name || audience : audience,
         memberId: audience === 'Specific Member' ? selectedMember?.id : undefined,
-        channels: { inApp, email: emailChannel, sms: smsChannel },
+        channels: { inApp, email: emailChannel, sms: smsChannel, push: pushChannel },
         emailSubject,
         emailHtml,
       });
+      const delivery = result.deliveryStatus;
+      setQueuedSummary(pushChannel
+        ? delivery
+          ? `${delivery.queued} queued${delivery.skipped ? `, ${delivery.skipped} skipped` : ''}. Delivery updates are available in Notifications.`
+          : 'Accepted by the service. Delivery updates are available in Notifications.'
+        : 'Accepted by the service.');
       setSent(true);
       setTimeout(() => {
-        setSent(false); setTitle(''); setMessage(''); setSelectedMember(null); setMemberSearch(''); onClose();
-      }, 900);
+        setSent(false); setQueuedSummary(''); setTitle(''); setMessage(''); setSelectedMember(null); setMemberSearch(''); setPushChannel(false); onClose();
+      }, 1800);
     } catch (error) {
       Alert.alert('Notification not sent', error instanceof Error ? error.message : 'Please try again.');
     } finally {
@@ -109,8 +117,8 @@ function SendNotificationSheet({
           {sent ? (
             <View style={sheetStyles.sentState}>
               <Icon name="check-circle" size={48} color={Colors.success} />
-              <Text style={sheetStyles.sentTitle}>Notification Sent!</Text>
-              <Text style={sheetStyles.sentSub}>Your message has been delivered.</Text>
+              <Text style={sheetStyles.sentTitle}>{pushChannel ? 'Notification queued' : 'Notification accepted'}</Text>
+              <Text style={sheetStyles.sentSub}>{queuedSummary}</Text>
             </View>
           ) : (
             <ScrollView ref={formScrollRef} contentContainerStyle={sheetStyles.formScrollContent} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
@@ -128,7 +136,10 @@ function SendNotificationSheet({
                 label="Send To"
                 required
                 value={audience}
-                options={ALL_AUDIENCES.map(item => ({ value: item, label: item }))}
+                options={(pushChannel
+                  ? ALL_AUDIENCES.filter(item => item !== 'Community Staff')
+                  : ALL_AUDIENCES
+                ).map(item => ({ value: item, label: item }))}
                 onChange={value => setAudience(value as AudienceType)}
               />
 
@@ -199,8 +210,14 @@ function SendNotificationSheet({
               {/* Title */}
               <Text style={sheetStyles.label}>Delivery channels *</Text>
               <View style={sheetStyles.channelRow}>
-                {[{ label: 'In-app', value: inApp, set: setInApp, icon: 'bell-outline' }, { label: 'Email', value: emailChannel, set: setEmailChannel, icon: 'email-outline' }, { label: 'SMS', value: smsChannel, set: setSmsChannel, icon: 'message-text-outline' }].map(channel => <TouchableOpacity key={channel.label} onPress={() => channel.set(!channel.value)} style={[sheetStyles.channelChip, channel.value && { borderColor: typeCfg.color, backgroundColor: `${typeCfg.color}18` }]}><Icon name={channel.value ? 'checkbox-marked' : channel.icon} size={18} color={channel.value ? typeCfg.color : Colors.textMuted} /><Text style={[sheetStyles.channelText, channel.value && { color: typeCfg.color }]}>{channel.label}</Text></TouchableOpacity>)}
+                {[
+                  { label: 'In-app', value: inApp, set: setInApp, icon: 'bell-outline' },
+                  { label: 'Push', value: pushChannel, set: (value: boolean) => { setPushChannel(value); if (value && audience === 'Community Staff') setAudience('All Members'); }, icon: 'cellphone-message' },
+                  { label: 'Email', value: emailChannel, set: setEmailChannel, icon: 'email-outline' },
+                  { label: 'SMS', value: smsChannel, set: setSmsChannel, icon: 'message-text-outline' },
+                ].map(channel => <TouchableOpacity key={channel.label} accessibilityRole="checkbox" accessibilityState={{ checked: channel.value }} onPress={() => channel.set(!channel.value)} style={[sheetStyles.channelChip, channel.value && { borderColor: typeCfg.color, backgroundColor: `${typeCfg.color}18` }]}><Icon name={channel.value ? 'checkbox-marked' : channel.icon} size={18} color={channel.value ? typeCfg.color : Colors.textMuted} /><Text style={[sheetStyles.channelText, channel.value && { color: typeCfg.color }]}>{channel.label}</Text></TouchableOpacity>)}
               </View>
+              {pushChannel ? <Text style={sheetStyles.channelHelp}>Push is sent only to opted-in members with a registered device. The service reports queued status before device delivery.</Text> : null}
 
               {/* Title */}
               <Text style={sheetStyles.label}>Title *</Text>
@@ -733,6 +750,7 @@ const sheetStyles = StyleSheet.create({
   channelRow: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm, marginBottom: Spacing.sm },
   channelChip: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: Spacing.md, paddingVertical: 8, borderRadius: BorderRadius.full, backgroundColor: Colors.secondarySurface, borderWidth: 1, borderColor: Colors.borderDefault },
   channelText: { fontFamily: 'SequelSans-SemiBoldBody', fontSize: 12, color: Colors.textSecondary },
+  channelHelp: { ...Typography.caption, color: Colors.textMuted, marginBottom: Spacing.sm },
 
   cabinRow: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm, marginBottom: Spacing.sm },
   cabinChip: { paddingHorizontal: Spacing.sm, paddingVertical: 6, borderRadius: BorderRadius.full, backgroundColor: Colors.secondarySurface, borderWidth: 1, borderColor: Colors.borderDefault },

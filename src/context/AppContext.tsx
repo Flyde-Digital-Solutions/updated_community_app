@@ -21,6 +21,8 @@ import {
   BuildingOption,
   Cabin,
   CommonArea,
+  CommunityPushPreferenceKey,
+  CommunityPushPreferences,
   CommunityPost,
   Company,
   DayPass,
@@ -38,6 +40,11 @@ import {
   Ticket,
   Visitor,
 } from '../types/domain';
+import {
+  communityPushPreferencesFrom,
+  defaultCommunityPushPreferences,
+  pushDeliveryStatusFrom,
+} from '../utils/pushNotifications';
 import { hydrateDayPassIdentity, normalizeDayPassStatus } from '../utils/dayPass';
 import { paymentOrderFrom } from '../utils/razorpay';
 import { normalizeRoomBookingStatus } from '../utils/roomBooking';
@@ -108,6 +115,7 @@ type AppState = {
   commonAreas: CommonArea[];
   dashboardSummary: Record<string, number>;
   buildings: BuildingOption[];
+  pushPreferences: CommunityPushPreferences;
 };
 
 const initialState: AppState = {
@@ -138,6 +146,7 @@ const initialState: AppState = {
   commonAreas: [],
   dashboardSummary: {},
   buildings: [],
+  pushPreferences: defaultCommunityPushPreferences,
 };
 
 type NewTicket = Omit<Ticket, 'id' | 'backendId' | 'createdAt' | 'syncState'> & {
@@ -194,7 +203,7 @@ type SendNotificationInput = Omit<
   'id' | 'sentAt' | 'syncState'
 > & {
   memberId?: string;
-  channels?: { inApp: boolean; email: boolean; sms: boolean };
+  channels?: { inApp: boolean; email: boolean; sms: boolean; push: boolean };
   emailSubject?: string;
   emailHtml?: string;
 };
@@ -244,6 +253,12 @@ type AppContextValue = AppState & {
   sendNotification(
     notification: SendNotificationInput,
   ): Promise<NotificationRecord>;
+  loadPushPreferences(): Promise<void>;
+  updatePushPreference(
+    key: CommunityPushPreferenceKey,
+    enabled: boolean,
+  ): Promise<void>;
+  refreshNotificationStatus(id: string): Promise<void>;
   createLead(lead: NewLead): Promise<Lead>;
   verifyLeadKyc(leadId: string, documents: FileAttachment[]): Promise<void>;
   updateLead(id: string, patch: Partial<Lead>): Promise<void>;
@@ -326,6 +341,26 @@ const displayName = (value: unknown) => {
       record.companyName ||
       [record.firstName, record.lastName].filter(Boolean).join(' '),
   );
+};
+
+const identityRecord = (value: unknown) =>
+  value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+
+/**
+ * Member-created ticket responses are not consistent about whether the
+ * identity is the membership record itself or a nested auth user/profile.
+ * Prefer the outer display name, then inspect the known populated wrappers.
+ */
+const identityDisplayName = (value: unknown): string => {
+  const direct = displayName(value);
+  if (direct) return direct;
+  const record = identityRecord(value);
+  if (!record) return '';
+  return [record.member, record.user, record.userId, record.profile, record.account]
+    .map(displayName)
+    .find(Boolean) || '';
 };
 
 const unwrapData = (payload: Record<string, unknown>) =>
@@ -510,6 +545,20 @@ const ticketAttachment = (value: unknown): { name: string; url: string } | null 
   };
 };
 
+const publicReplyText = (raw: Record<string, unknown>) => {
+  const direct = text(raw.publicReply || raw.latestPublicReply);
+  if (direct) return direct;
+  const replies = Array.isArray(raw.publicReplies)
+    ? raw.publicReplies
+    : Array.isArray(raw.publicThread)
+    ? raw.publicThread
+    : [];
+  const latest = replies[replies.length - 1];
+  if (!latest || typeof latest !== 'object') return text(latest);
+  const record = latest as Record<string, unknown>;
+  return text(record.message || record.reply || record.text || record.body);
+};
+
 export const normalizeTicket = (raw: Record<string, unknown>): Ticket => {
   const categoryContainer =
     raw.category && typeof raw.category === 'object'
@@ -525,6 +574,12 @@ export const normalizeTicket = (raw: Record<string, unknown>): Ticket => {
     raw.subcategory;
   const creator =
     raw.member ||
+    raw.memberId ||
+    raw.guest ||
+    raw.guestId ||
+    raw.requester ||
+    raw.requestedBy ||
+    raw.requested_by ||
     raw.raisedBy ||
     raw.raised_by ||
     raw.createdBy ||
@@ -532,7 +587,7 @@ export const normalizeTicket = (raw: Record<string, unknown>): Ticket => {
     raw.creator;
   const creatorName =
     creator && typeof creator === 'object'
-      ? displayName(creator)
+      ? identityDisplayName(creator)
       : /^[a-f\d]{24}$/i.test(text(creator))
       ? ''
       : text(creator);
@@ -576,6 +631,7 @@ export const normalizeTicket = (raw: Record<string, unknown>): Ticket => {
     buildingId: objectId(raw.buildingId || raw.building) || undefined,
     subject: text(raw.subject || raw.title),
     description: text(raw.description),
+    publicReply: publicReplyText(raw) || undefined,
     status: (ticketDisplayStatus(raw.status) || 'Open') as Ticket['status'],
     category: displayName(categoryRecord) || 'Other',
     categoryId: objectId(categoryRecord) || undefined,
@@ -590,11 +646,21 @@ export const normalizeTicket = (raw: Record<string, unknown>): Ticket => {
           raw.createdByName ||
           raw.createdByFullName ||
           raw.raisedByName ||
+          raw.guestName ||
+          raw.requesterName ||
+          raw.requestedByName ||
           raw.created_by_name,
       ),
     createdById:
       objectId(
-        creator || raw.createdById || raw.created_by_id || raw.creatorId,
+        creator ||
+          raw.memberId ||
+          raw.guestId ||
+          raw.requesterId ||
+          raw.requestedById ||
+          raw.createdById ||
+          raw.created_by_id ||
+          raw.creatorId,
       ) || undefined,
     company: displayName(raw.client || raw.company) || text(raw.companyName),
     clientId: objectId(raw.clientId || raw.client) || undefined,
@@ -897,15 +963,32 @@ const normalizeMeetingRoom = (raw: Record<string, unknown>): MeetingRoom => {
   };
 };
 
-const normalizeMember = (raw: Record<string, unknown>): Member => {
+export const normalizeMember = (raw: Record<string, unknown>): Member => {
   const company = raw.company || raw.client;
   const cabin = raw.cabin as Record<string, unknown> | undefined;
+  const linkedUser =
+    raw.user || raw.userId || raw.authUser || raw.account || raw.profile;
   return {
     id: text(raw._id || raw.id) || makeId('M'),
-    name: displayName(raw),
-    email: text(raw.email),
-    phone: text(raw.phone || raw.mobile),
-    role: text(raw.designation || raw.role),
+    userId:
+      objectId(
+        linkedUser || raw.authUserId || raw.accountId || raw.profileId,
+      ) || undefined,
+    name: displayName(raw) || identityDisplayName(linkedUser),
+    email:
+      text(raw.email) || text(identityRecord(linkedUser)?.email),
+    phone:
+      text(raw.phone || raw.mobile) ||
+      text(
+        identityRecord(linkedUser)?.phone ||
+          identityRecord(linkedUser)?.mobile,
+      ),
+    role:
+      text(raw.designation || raw.role) ||
+      text(
+        identityRecord(linkedUser)?.designation ||
+          identityRecord(linkedUser)?.role,
+      ),
     companyId: objectId(raw.companyId || raw.clientId || company),
     company: displayName(company) || text(raw.companyName),
     cabin: displayName(cabin) || text(raw.cabinNumber),
@@ -919,6 +1002,13 @@ const normalizeMember = (raw: Record<string, unknown>): Member => {
     bio: text(raw.bio),
   };
 };
+
+export const memberMatchesTicketCreator = (
+  member: Member,
+  creatorId?: string,
+) => Boolean(
+  creatorId && (member.id === creatorId || member.userId === creatorId),
+);
 
 const normalizeCompany = (raw: Record<string, unknown>): Company => ({
   // Mutation endpoints require the Mongo record id. `clientID` is the human-facing
@@ -1285,10 +1375,13 @@ const normalizeDashboardSummary = (
   return values;
 };
 
-const toTicketPayload = (input: Partial<Ticket>, buildingId?: string) => ({
+export const toTicketPayload = (input: Partial<Ticket>, buildingId?: string) => ({
   ...(input.subject !== undefined ? { subject: input.subject.trim() } : {}),
   ...(input.description !== undefined
     ? { description: input.description.trim() }
+    : {}),
+  ...(input.publicReply?.trim()
+    ? { publicReply: input.publicReply.trim() }
     : {}),
   ...(input.priority !== undefined
     ? { priority: normalizeStatus(input.priority).replace(/\s+/g, '_') }
@@ -1816,9 +1909,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           : extractList<Record<string, unknown>>(tickets, ['tickets']).map(
               normalizeTicket,
             );
-      // Ticket list responses can omit createdBy even when ticket detail has it.
-      // Enrich missing creators once; cached records avoid repeating detail calls
-      // on subsequent refreshes. Keep the batch small to avoid flooding the API.
+      // Ticket lists can return only a creator ID while the detail response has
+      // the populated identity. Enrich every unnamed creator once; an ID alone
+      // is not sufficient to render the person who raised the ticket.
       const ticketCreatorDetails = new Map<string, Ticket>();
       const ticketsNeedingCreator = (nextTickets ?? []).filter(ticket => {
         const cached = stateRef.current.tickets.find(
@@ -1826,9 +1919,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         );
         return Boolean(
           !ticket.memberName &&
-            !ticket.createdById &&
             !cached?.memberName &&
-            !cached?.createdById &&
             ticket.backendId,
         );
       });
@@ -1946,8 +2037,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           creatorDetail?.createdById ||
           previous?.createdById;
         const creator = (hydratedMembers ?? stateRef.current.members).find(
-          item => item.id === createdById,
+          item => memberMatchesTicketCreator(item, createdById),
         );
+        const guestCreator = (
+          nextOnDemandUsers ?? stateRef.current.onDemandUsers
+        ).find(item => item.id === createdById);
         const company = (nextCompanies ?? stateRef.current.companies).find(
           item => item.id === ticket.clientId,
         );
@@ -1958,12 +2052,19 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             ticket.memberName ||
             creatorDetail?.memberName ||
             creator?.name ||
+            guestCreator?.name ||
             (createdById === stateRef.current.user?.id
               ? stateRef.current.user?.name
               : '') ||
             previous?.memberName ||
             '',
-          company: ticket.company || company?.name || previous?.company || '',
+          company:
+            ticket.company ||
+            company?.name ||
+            creator?.company ||
+            guestCreator?.company ||
+            previous?.company ||
+            '',
           assignedTo: ticket.assignedTo || previous?.assignedTo,
           assignedToId: ticket.assignedToId || previous?.assignedToId,
           attachmentName:
@@ -3044,6 +3145,44 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     [performMutation],
   );
 
+  const loadPushPreferences = useCallback(async () => {
+    const response = await apiClient.get<Record<string, unknown>>(
+      Routes.community.pushPreferences,
+    );
+    const data = unwrapData(response);
+    const categories = communityPushPreferencesFrom(data.categories);
+    setState(current => ({ ...current, pushPreferences: categories }));
+  }, []);
+
+  const updatePushPreference = useCallback(
+    async (key: CommunityPushPreferenceKey, enabled: boolean) => {
+      const response = await apiClient.put<Record<string, unknown>>(
+        Routes.community.pushPreferences,
+        { categories: { [key]: enabled } },
+      );
+      const data = unwrapData(response);
+      const categories = communityPushPreferencesFrom(data.categories);
+      setState(current => ({ ...current, pushPreferences: categories }));
+    },
+    [],
+  );
+
+  const refreshNotificationStatus = useCallback(async (id: string) => {
+    const notification = stateRef.current.notifications.find(item => item.id === id);
+    if (!notification?.sendId) return;
+    const response = await apiClient.get<Record<string, unknown>>(
+      Routes.notificationSendStatus(notification.sendId),
+    );
+    const data = unwrapData(response);
+    const deliveryStatus = pushDeliveryStatusFrom(data);
+    setState(current => ({
+      ...current,
+      notifications: current.notifications.map(item =>
+        item.id === id ? { ...item, deliveryStatus } : item,
+      ),
+    }));
+  }, []);
+
   const sendNotification = useCallback(
     async (input: SendNotificationInput) => {
       const { memberId, channels, emailSubject, emailHtml, ...displayInput } =
@@ -3060,10 +3199,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         notifications: [record, ...current.notifications],
       }));
       try {
-        const synced = await performMutation({
-          method: 'POST',
-          path: Routes.community.sendNotification,
-          body: {
+        const response = await apiClient.post<Record<string, unknown>>(
+          Routes.community.sendNotification,
+          {
             title: input.title.trim(),
             message: input.message.trim(),
             audienceType: memberId
@@ -3071,7 +3209,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
               : input.audience === 'Community Staff'
               ? 'community_staff'
               : 'all_members',
-            channels: channels || { inApp: true, email: false, sms: false },
+            channels: channels || { inApp: true, email: false, sms: false, push: false },
             ...(memberId ? { memberId } : {}),
             ...(channels?.email && emailSubject?.trim()
               ? { emailSubject: emailSubject.trim() }
@@ -3080,10 +3218,23 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
               ? { emailHtml: emailHtml.trim() }
               : {}),
           },
-        });
+        );
+        const data = unwrapData(response);
+        const sendId = text(data.sendId || response.sendId) || undefined;
+        const pushRequested = Boolean(channels?.push);
+        const deliveryStatus = pushRequested
+          ? pushDeliveryStatusFrom({
+              total: data.count ?? response.count,
+              queued: data.queuedCount ?? response.queuedCount,
+              skipped: data.skippedCount ?? response.skippedCount,
+            })
+          : undefined;
         const completed = {
           ...record,
-          syncState: synced ? ('synced' as const) : ('pending' as const),
+          pushRequested,
+          sendId,
+          deliveryStatus,
+          syncState: 'synced' as const,
         };
         setState(current => ({
           ...current,
@@ -3102,7 +3253,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         throw error;
       }
     },
-    [performMutation],
+    [],
   );
 
   const createLead = useCallback(async (input: NewLead) => {
@@ -3660,6 +3811,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       updateEvent,
       deleteEvent,
       sendNotification,
+      loadPushPreferences,
+      updatePushPreference,
+      refreshNotificationStatus,
       createLead,
       verifyLeadKyc,
       updateLead,
@@ -3700,6 +3854,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       updateEvent,
       deleteEvent,
       sendNotification,
+      loadPushPreferences,
+      updatePushPreference,
+      refreshNotificationStatus,
       createLead,
       verifyLeadKyc,
       updateLead,

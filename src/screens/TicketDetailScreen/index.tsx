@@ -28,6 +28,7 @@ interface Ticket {
   location: string;
   raisedAt: string;
   description: string;
+  publicReply?: string;
   subCategory?: string;
   priority: string;
   assignedTo?: string;
@@ -85,6 +86,7 @@ export function TicketDetailScreen() {
     location: storedTicket.location,
     raisedAt: new Date(storedTicket.createdAt).toLocaleString('en-IN'),
     description: storedTicket.description,
+    publicReply: storedTicket.publicReply,
     subCategory: storedTicket.subCategoryName,
     priority: storedTicket.priority,
     assignedTo: storedTicket.assignedTo,
@@ -111,6 +113,7 @@ export function TicketDetailScreen() {
       location: storedTicket.location,
       raisedAt: new Date(storedTicket.createdAt).toLocaleString('en-IN'),
       description: storedTicket.description,
+      publicReply: storedTicket.publicReply,
       subCategory: storedTicket.subCategoryName,
       priority: storedTicket.priority,
       assignedTo: storedTicket.assignedTo,
@@ -194,6 +197,15 @@ export function TicketDetailScreen() {
           <Text style={styles.ticketTitle}>{ticket.title}</Text>
           <Text style={styles.description}>{ticket.description}</Text>
         </View>
+
+        {ticket.publicReply ? (
+          <>
+            <Text style={styles.sectionLabel}>Latest Public Reply</Text>
+            <View style={styles.card}>
+              <Text style={styles.description}>{ticket.publicReply}</Text>
+            </View>
+          </>
+        ) : null}
 
         <Text style={styles.sectionLabel}>Ticket Information</Text>
         <View style={styles.card}>

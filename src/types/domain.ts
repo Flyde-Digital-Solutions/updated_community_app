@@ -32,6 +32,8 @@ export interface Ticket {
   buildingId?: string;
   subject: string;
   description: string;
+  /** Latest staff reply that is visible to the member who raised the ticket. */
+  publicReply?: string;
   status: 'Open' | 'In Progress' | 'Resolved' | 'Closed';
   category: string;
   categoryId?: string;
@@ -158,6 +160,8 @@ export interface MeetingRoom {
 
 export interface Member {
   id: string;
+  /** Auth/user record linked to this community membership. */
+  userId?: string;
   name: string;
   email: string;
   phone: string;
@@ -261,7 +265,26 @@ export interface NotificationRecord {
   sentBy?: string;
   readCount?: number;
   totalCount?: number;
+  pushRequested?: boolean;
+  sendId?: string;
+  deliveryStatus?: PushDeliveryStatus;
   syncState?: SyncState;
+}
+
+export type CommunityPushPreferenceKey =
+  | 'accessSafety'
+  | 'visitorProcessing'
+  | 'buildingIncident'
+  | 'taskSla';
+
+export type CommunityPushPreferences = Record<CommunityPushPreferenceKey, boolean>;
+
+export interface PushDeliveryStatus {
+  total: number;
+  queued: number;
+  sent: number;
+  failed: number;
+  skipped: number;
 }
 
 export interface Lead {

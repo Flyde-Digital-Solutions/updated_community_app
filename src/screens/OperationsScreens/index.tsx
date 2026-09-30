@@ -2782,6 +2782,7 @@ export function CreateTicketScreen() {
   const existing = tickets.find(item => item.id === route.params?.ticketId);
   const [subject, setSubject] = useState(existing?.subject || '');
   const [description, setDescription] = useState(existing?.description || '');
+  const [publicReply, setPublicReply] = useState('');
   const [categoryId, setCategoryId] = useState(existing?.categoryId || '');
   const [subCategory, setSubCategory] = useState(existing?.subCategory || '');
   const [assignedTo, setAssignedTo] = useState(existing?.assignedToId || '');
@@ -2796,7 +2797,6 @@ export function CreateTicketScreen() {
   const [saving, setSaving] = useState(false);
   const missingTicketFields = [
     !subject.trim() && 'Subject', !description.trim() && 'Description',
-    !clientId && 'Client',
   ].filter((item): item is string => Boolean(item));
   const subcategories = useMemo(
     () =>
@@ -2846,8 +2846,6 @@ export function CreateTicketScreen() {
       subcategories.find(item => item.value === subCategory)?.label || '';
     const selectedClient = companies.find(item => item.id === clientId);
     const selectedAssignee = staff.find(item => item.value === assignedTo);
-    if (!clientId || !selectedClient)
-      return Alert.alert('Missing client', 'Select the client for this ticket.');
     if (!existing && (!user?.name || !user.buildingName))
       return Alert.alert(
         'Profile unavailable',
@@ -2865,10 +2863,11 @@ export function CreateTicketScreen() {
           subCategoryName,
           assignedToId: assignedTo,
           assignedTo: selectedAssignee?.label || '',
-          clientId,
-          company: selectedClient.name,
+          clientId: selectedClient?.id || existing.clientId,
+          company: selectedClient?.name || existing.company,
           priority,
           status,
+          ...(publicReply.trim() ? { publicReply: publicReply.trim() } : {}),
         });
       else
         await createTicket({
@@ -2880,12 +2879,12 @@ export function CreateTicketScreen() {
           subCategoryName,
           assignedToId: assignedTo,
           assignedTo: selectedAssignee?.label || '',
-          clientId,
+          clientId: selectedClient?.id,
           priority,
           location: '',
           status,
           memberName: user!.name,
-          company: selectedClient.name,
+          company: selectedClient?.name || '',
           attachment: attachment || undefined,
         });
       navigation.goBack();
@@ -2913,16 +2912,30 @@ export function CreateTicketScreen() {
           onChangeText={setDescription}
           multiline
         />
+        {existing ? (
+          <View>
+            <Field
+              label="Public reply to member"
+              value={publicReply}
+              onChangeText={setPublicReply}
+              placeholder="Write an update the member can see"
+              multiline
+            />
+            <Text style={styles.fieldHint}>
+              This reply is visible to the member. High and urgent tickets may
+              also notify them.
+            </Text>
+          </View>
+        ) : null}
         <DropdownField
           label="Client"
-          required
           value={clientId}
           options={companies.map(company => ({
             value: company.id,
             label: company.name,
           }))}
           onChange={setClientId}
-          placeholder="Select a client"
+          placeholder="Optional client"
           searchable
         />
         <DropdownField
@@ -4000,6 +4013,12 @@ const styles = StyleSheet.create({
     ...Typography.sectionLabel,
     color: Colors.textSecondary,
     marginBottom: 7,
+  },
+  fieldHint: {
+    ...Typography.caption,
+    color: Colors.textMuted,
+    marginTop: -Spacing.sm,
+    marginBottom: Spacing.md,
   },
   input: {
     minHeight: 50,

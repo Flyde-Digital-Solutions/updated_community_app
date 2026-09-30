@@ -1,4 +1,10 @@
-import { normalizeTicket, ticketApiStatus } from '../src/context/AppContext';
+import {
+  memberMatchesTicketCreator,
+  normalizeMember,
+  normalizeTicket,
+  ticketApiStatus,
+  toTicketPayload,
+} from '../src/context/AppContext';
 
 describe('ticket API normalization', () => {
   it('keeps the display ID and database ID and reads the nested category contract', () => {
@@ -51,8 +57,86 @@ describe('ticket API normalization', () => {
     expect(ticket.memberName).toBe('Nasir Ansari');
   });
 
+  it('uses the guest reference returned for member-app tickets', () => {
+    const unpopulated = normalizeTicket({
+      _id: 'database-id',
+      subject: 'Member app ticket',
+      guest: '6abb6def5b03b9306c07a342',
+    });
+    const populated = normalizeTicket({
+      _id: 'database-id-2',
+      subject: 'Populated member app ticket',
+      guest: {
+        _id: '6abb6def5b03b9306c07a342',
+        firstName: 'Ritik',
+        lastName: 'Test',
+      },
+    });
+
+    expect(unpopulated.createdById).toBe('6abb6def5b03b9306c07a342');
+    expect(unpopulated.memberName).toBe('');
+    expect(populated.createdById).toBe('6abb6def5b03b9306c07a342');
+    expect(populated.memberName).toBe('Ritik Test');
+  });
+
+  it('reads a creator populated through a nested user record', () => {
+    const ticket = normalizeTicket({
+      _id: 'database-id',
+      subject: 'Member-created ticket',
+      createdBy: {
+        _id: 'membership-id',
+        user: {
+          _id: 'user-id',
+          firstName: 'Ritik',
+          lastName: 'Test',
+        },
+      },
+    });
+
+    expect(ticket.createdById).toBe('membership-id');
+    expect(ticket.memberName).toBe('Ritik Test');
+  });
+
+  it('matches a ticket auth-user ID to its community member record', () => {
+    const member = normalizeMember({
+      _id: 'membership-id',
+      userId: {
+        _id: 'user-id',
+        firstName: 'Ritik',
+        lastName: 'Test',
+        email: 'ritik@example.com',
+      },
+    });
+
+    expect(member).toMatchObject({
+      id: 'membership-id',
+      userId: 'user-id',
+      name: 'Ritik Test',
+      email: 'ritik@example.com',
+    });
+    expect(memberMatchesTicketCreator(member, 'membership-id')).toBe(true);
+    expect(memberMatchesTicketCreator(member, 'user-id')).toBe(true);
+  });
+
   it('uses the ticket service status value and shows it correctly', () => {
     expect(ticketApiStatus('In Progress')).toBe('inprogress');
     expect(normalizeTicket({ status: 'inprogress' }).status).toBe('In Progress');
+  });
+
+  it('keeps the latest public reply returned by the ticket API', () => {
+    expect(normalizeTicket({ publicReply: 'Technician assigned.' }).publicReply)
+      .toBe('Technician assigned.');
+    expect(normalizeTicket({
+      publicReplies: [
+        { message: 'We are checking this.' },
+        { message: 'The issue is resolved.' },
+      ],
+    }).publicReply).toBe('The issue is resolved.');
+  });
+
+  it('sends a trimmed nonempty public reply in ticket PATCH payloads', () => {
+    expect(toTicketPayload({ publicReply: '  We are working on it.  ' }))
+      .toEqual({ publicReply: 'We are working on it.' });
+    expect(toTicketPayload({ publicReply: '   ' })).toEqual({});
   });
 });

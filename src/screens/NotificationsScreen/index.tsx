@@ -1,13 +1,15 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   View, Text, StyleSheet, FlatList,
-  TouchableOpacity, TextInput,
+  TouchableOpacity, TextInput, Alert,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors, Typography, Spacing, BorderRadius } from '../../theme';
 import { useApp } from '../../context/AppContext';
+import { PushDeliveryStatus } from '../../types/domain';
+import { isPushDeliveryTerminal } from '../../utils/pushNotifications';
 
 type NotificationType = 'Announcement' | 'Event' | 'Billing' | 'Maintenance' | 'Visitor';
 type AudienceType     = 'All Members' | 'Specific Cabin' | 'Specific Member' | 'Day Pass Users';
@@ -24,6 +26,9 @@ interface Notification {
   readCount?: number;
   totalCount?: number;
   syncState?: 'synced' | 'pending';
+  pushRequested?: boolean;
+  sendId?: string;
+  deliveryStatus?: PushDeliveryStatus;
 }
 
 const TYPE_CONFIG: Record<NotificationType, { color: string; icon: string; bg: string }> = {
@@ -43,13 +48,25 @@ const AUDIENCE_CONFIG: Record<AudienceType, { color: string; icon: string }> = {
 
 const ALL_TYPES: NotificationType[] = ['Announcement', 'Event', 'Billing', 'Maintenance', 'Visitor'];
 
-function NotificationCard({ notification }: { notification: Notification }) {
+function NotificationCard({ notification, onRefresh }: { notification: Notification; onRefresh: () => Promise<void> }) {
   const [expanded, setExpanded] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const typeCfg     = TYPE_CONFIG[notification.type];
   const audienceCfg = AUDIENCE_CONFIG[notification.audience];
   const hasReadStats = typeof notification.readCount === 'number' && typeof notification.totalCount === 'number' && notification.totalCount > 0;
   const readPct = hasReadStats ? Math.round((notification.readCount! / notification.totalCount!) * 100) : 0;
   const isPending = notification.syncState === 'pending';
+  const delivery = notification.deliveryStatus;
+  const refreshDelivery = async () => {
+    setRefreshing(true);
+    try {
+      await onRefresh();
+    } catch (error) {
+      Alert.alert('Status unavailable', error instanceof Error ? error.message : 'Delivery status could not be refreshed.');
+    } finally {
+      setRefreshing(false);
+    }
+  };
 
   return (
     <TouchableOpacity
@@ -127,7 +144,37 @@ function NotificationCard({ notification }: { notification: Notification }) {
           </View>
           <View style={styles.detailRow}>
             <Text style={styles.detailLabel}>Delivery</Text>
-            {hasReadStats ? (
+            {notification.pushRequested && delivery ? (
+              <View style={styles.deliveryDetail}>
+                <View style={styles.deliveryGrid}>
+                  {([
+                    ['Queued', delivery.queued, Colors.accent300],
+                    ['Sent', delivery.sent, Colors.success],
+                    ['Failed', delivery.failed, Colors.alert],
+                    ['Skipped', delivery.skipped, Colors.textSecondary],
+                  ] as const).map(([label, count, color]) => (
+                    <View key={label} style={styles.deliveryMetric}>
+                      <Text style={[styles.deliveryMetricValue, { color }]}>{count}</Text>
+                      <Text style={styles.deliveryMetricLabel}>{label}</Text>
+                    </View>
+                  ))}
+                </View>
+                {notification.sendId ? (
+                  <TouchableOpacity
+                    accessibilityRole="button"
+                    accessibilityLabel="Refresh delivery status"
+                    disabled={refreshing}
+                    onPress={event => { event.stopPropagation(); refreshDelivery(); }}
+                    style={styles.refreshStatusBtn}
+                  >
+                    <Icon name={refreshing ? 'sync' : 'refresh'} size={15} color={Colors.accent300} />
+                    <Text style={styles.refreshStatusText}>{refreshing ? 'Refreshing…' : 'Refresh status'}</Text>
+                  </TouchableOpacity>
+                ) : (
+                  <Text style={styles.detailValue}>No recipients were queued.</Text>
+                )}
+              </View>
+            ) : hasReadStats ? (
               <View style={styles.deliveryDetail}>
                 <View style={styles.readReceiptRow}>
                   <Text style={styles.readReceiptText}>{notification.readCount}/{notification.totalCount} read</Text>
@@ -155,7 +202,7 @@ function NotificationCard({ notification }: { notification: Notification }) {
 export function NotificationsScreen() {
   const navigation = useNavigation();
   const insets     = useSafeAreaInsets();
-  const { notifications } = useApp();
+  const { notifications, refreshNotificationStatus } = useApp();
   const notificationData: Notification[] = notifications.map(notification => {
     const audience = Object.prototype.hasOwnProperty.call(AUDIENCE_CONFIG, notification.audience) ? notification.audience as AudienceType : 'Specific Member';
     return {
@@ -165,8 +212,35 @@ export function NotificationsScreen() {
       sentTo: notification.audience, audience, sentAt: new Date(notification.sentAt).toLocaleString('en-IN'),
       sentBy: notification.sentBy, readCount: notification.readCount, totalCount: notification.totalCount,
       syncState: notification.syncState,
+      pushRequested: notification.pushRequested,
+      sendId: notification.sendId,
+      deliveryStatus: notification.deliveryStatus,
     };
   });
+
+  const pollableIds = useMemo(() => notifications
+    .filter(notification => notification.sendId && !isPushDeliveryTerminal(notification.deliveryStatus))
+    .map(notification => notification.id)
+    .sort()
+    .join(','), [notifications]);
+
+  useEffect(() => {
+    if (!pollableIds) return;
+    let cancelled = false;
+    let attempts = 0;
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    const poll = async () => {
+      const ids = pollableIds.split(',').filter(Boolean);
+      await Promise.all(ids.map(id => refreshNotificationStatus(id).catch(() => undefined)));
+      attempts += 1;
+      if (!cancelled && attempts < 6) timeout = setTimeout(poll, 4000);
+    };
+    timeout = setTimeout(poll, 1200);
+    return () => {
+      cancelled = true;
+      if (timeout) clearTimeout(timeout);
+    };
+  }, [pollableIds, refreshNotificationStatus]);
 
   const [search,      setSearch]      = useState('');
   const [activeType,  setActiveType]  = useState<NotificationType | 'All'>('All');
@@ -243,7 +317,7 @@ export function NotificationsScreen() {
             <Text style={styles.emptyText}>No notifications found</Text>
           </View>
         }
-        renderItem={({ item }) => <NotificationCard notification={item} />}
+        renderItem={({ item }) => <NotificationCard notification={item} onRefresh={() => refreshNotificationStatus(item.id)} />}
       />
     </View>
   );
@@ -332,6 +406,12 @@ const styles = StyleSheet.create({
   statusRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 4, flex: 1 },
   statusText: { fontFamily: 'SequelSans-SemiBoldBody', fontSize: 11, textAlign: 'right' },
   deliveryDetail: { alignItems: 'flex-end', gap: 5, flex: 1 },
+  deliveryGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'flex-end', gap: Spacing.sm },
+  deliveryMetric: { minWidth: 42, alignItems: 'center', paddingVertical: 4, paddingHorizontal: 6, borderRadius: BorderRadius.sm, backgroundColor: Colors.background },
+  deliveryMetricValue: { fontFamily: 'SequelSans-SemiBoldBody', fontSize: 14 },
+  deliveryMetricLabel: { ...Typography.caption, color: Colors.textMuted, fontSize: 9 },
+  refreshStatusBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 5, paddingHorizontal: 8 },
+  refreshStatusText: { fontFamily: 'SequelSans-SemiBoldBody', fontSize: 11, color: Colors.accent300 },
   expandHint: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 4,
     marginTop: Spacing.md, paddingTop: Spacing.sm,

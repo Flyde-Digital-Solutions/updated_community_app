@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView,
-  TouchableOpacity, Alert,
+  TouchableOpacity, Alert, Switch,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
@@ -10,12 +10,58 @@ import { Colors, Typography, Spacing, BorderRadius } from '../../theme';
 import { useApp } from '../../context/AppContext';
 import { getInitials } from '../../utils/userDisplay';
 import { openExternalLink } from '../../utils/openExternalLink';
+import { CommunityPushPreferenceKey } from '../../types/domain';
+
+const PUSH_PREFERENCES: Array<{
+  key: CommunityPushPreferenceKey;
+  title: string;
+  description: string;
+}> = [
+  { key: 'accessSafety', title: 'Access & safety', description: 'Urgent access and safety incidents' },
+  { key: 'visitorProcessing', title: 'Visitor processing', description: 'Visitors waiting for reception action' },
+  { key: 'buildingIncident', title: 'Building incidents', description: 'Urgent incidents and closures' },
+  { key: 'taskSla', title: 'Task & SLA alerts', description: 'Urgent assignments and SLA breaches' },
+];
 
 export function ProfileScreen() {
   const navigation = useNavigation();
   const insets     = useSafeAreaInsets();
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
-  const { user, logout, connection, pendingOperations, syncAll, resetLocalData } = useApp();
+  const {
+    user, logout, connection, pendingOperations, syncAll, resetLocalData,
+    pushPreferences, loadPushPreferences, updatePushPreference,
+  } = useApp();
+  const [preferencesLoading, setPreferencesLoading] = useState(true);
+  const [savingPreference, setSavingPreference] = useState<CommunityPushPreferenceKey | null>(null);
+  const [preferenceError, setPreferenceError] = useState('');
+
+  const loadPreferences = useCallback(async () => {
+    setPreferencesLoading(true);
+    setPreferenceError('');
+    try {
+      await loadPushPreferences();
+    } catch (error) {
+      setPreferenceError(error instanceof Error ? error.message : 'Preferences could not be loaded.');
+    } finally {
+      setPreferencesLoading(false);
+    }
+  }, [loadPushPreferences]);
+
+  useEffect(() => {
+    loadPreferences();
+  }, [loadPreferences]);
+
+  const togglePreference = async (key: CommunityPushPreferenceKey, enabled: boolean) => {
+    setSavingPreference(key);
+    setPreferenceError('');
+    try {
+      await updatePushPreference(key, enabled);
+    } catch (error) {
+      setPreferenceError(error instanceof Error ? error.message : 'Preference could not be saved.');
+    } finally {
+      setSavingPreference(null);
+    }
+  };
 
   const PROFILE = {
     name:  user?.name || '',
@@ -101,6 +147,42 @@ export function ProfileScreen() {
             </View>
             <Icon name="chevron-right" size={16} color={Colors.textMuted} />
           </TouchableOpacity>
+        </View>
+
+        <Text style={styles.sectionLabel}>Push notification categories</Text>
+        <Text style={styles.sectionHelp}>
+          These choices are separate from the notification permission in your phone settings.
+        </Text>
+        <View style={styles.card}>
+          {PUSH_PREFERENCES.map((preference, index) => (
+            <React.Fragment key={preference.key}>
+              {index > 0 ? <View style={styles.divider} /> : null}
+              <View style={styles.preferenceRow}>
+                <View style={styles.infoText}>
+                  <Text style={styles.infoValue}>{preference.title}</Text>
+                  <Text style={styles.infoLabel}>{preference.description}</Text>
+                </View>
+                <Switch
+                  accessibilityLabel={`${preference.title} push notifications`}
+                  value={pushPreferences[preference.key]}
+                  disabled={preferencesLoading || savingPreference !== null}
+                  onValueChange={value => togglePreference(preference.key, value)}
+                  trackColor={{ false: Colors.borderDefault, true: Colors.accent300 }}
+                  thumbColor={Colors.white}
+                />
+              </View>
+            </React.Fragment>
+          ))}
+          {preferencesLoading ? (
+            <Text style={styles.preferenceStatus}>Loading preferences…</Text>
+          ) : preferenceError ? (
+            <TouchableOpacity onPress={loadPreferences} style={styles.preferenceErrorRow}>
+              <Icon name="alert-circle-outline" size={16} color={Colors.alert} />
+              <Text style={styles.preferenceError}>{preferenceError} Tap to retry.</Text>
+            </TouchableOpacity>
+          ) : (
+            <Text style={styles.preferenceStatus}>Saved by the service for this staff account.</Text>
+          )}
         </View>
 
         <Text style={styles.sectionLabel}>Data & Sync</Text>
@@ -207,6 +289,7 @@ const styles = StyleSheet.create({
     color: Colors.textSecondary, letterSpacing: 0.5,
     textTransform: 'uppercase', marginBottom: Spacing.sm, marginTop: Spacing.md,
   },
+  sectionHelp: { ...Typography.caption, color: Colors.textMuted, marginTop: -4, marginBottom: Spacing.sm },
 
   // Card
   card: {
@@ -220,6 +303,10 @@ const styles = StyleSheet.create({
   infoLabel:   { ...Typography.caption, color: Colors.textSecondary, marginBottom: 2 },
   infoValue:   { fontFamily: 'SequelSans-SemiBoldBody', fontSize: 14, color: Colors.textPrimary },
   divider:     { height: 1, backgroundColor: Colors.borderDefault },
+  preferenceRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md, padding: Spacing.lg },
+  preferenceStatus: { ...Typography.caption, color: Colors.textMuted, paddingHorizontal: Spacing.lg, paddingBottom: Spacing.md },
+  preferenceErrorRow: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: Spacing.lg, paddingBottom: Spacing.md },
+  preferenceError: { ...Typography.caption, color: Colors.alert, flex: 1 },
 
   // Logout
   logoutBtn: {
