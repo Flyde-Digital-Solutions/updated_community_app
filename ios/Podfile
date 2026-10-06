@@ -7,6 +7,10 @@ require_relative '../node_modules/react-native-permissions/scripts/setup'
 
 setup_permissions(['Camera'])
 
+# React Native Firebase's Swift Package Manager mode cannot be combined with
+# this app's static framework linkage. Resolve Firebase through CocoaPods.
+$RNFirebaseDisableSPM = true
+
 platform :ios, min_ios_version_supported
 prepare_react_native_project!
 
@@ -17,6 +21,7 @@ if linkage != nil
 end
 
 target 'ofis_screens' do
+  pod 'GoogleUtilities', :modular_headers => true
   config = use_native_modules!
 
 use_react_native!(

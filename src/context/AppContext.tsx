@@ -56,6 +56,7 @@ import { extensionForMimeType } from '../utils/attachmentMime';
 import { leadBillingAddress, leadBillingPayload, leadDocuments } from '../utils/leadData';
 import { eventImageAttachment } from '../utils/eventImage';
 import { mergeImportedRfidCards } from '../utils/rfidCard';
+import { clearPushBinding, isPushOptedIn, revokePushDevice } from '../services/pushDeviceService';
 
 const STORAGE_KEY = '@ofis/community-state/v3';
 const LEGACY_DEMO_SESSION_KEY = '@ofis/community-demo-session/v1';
@@ -1811,6 +1812,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   );
 
   const logout = useCallback(async () => {
+    if (await isPushOptedIn().catch(() => false)) {
+      await revokePushDevice().catch(() => clearPushBinding());
+    }
     setApiSession(null, null);
     setState(current => ({
       ...current,

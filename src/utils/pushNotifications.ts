@@ -3,6 +3,54 @@ import {
   PushDeliveryStatus,
 } from '../types/domain';
 
+export const COMMUNITY_PUSH_DESTINATIONS = {
+  community_access_safety: 'community_access_issue',
+  community_visitor_processing: 'community_visitor_details',
+  community_building_incident: 'building_incident_details',
+  community_task_sla: 'community_task_details',
+} as const;
+
+export type CommunityPushEventType = keyof typeof COMMUNITY_PUSH_DESTINATIONS;
+export type CommunityPushRouteKey = typeof COMMUNITY_PUSH_DESTINATIONS[CommunityPushEventType];
+
+export type CommunityPushIntent = {
+  notificationId: string;
+  eventType: CommunityPushEventType;
+  routeKey: CommunityPushRouteKey;
+  entityId: string;
+};
+
+const RECORD_ID = /^[A-Za-z0-9_-]{8,128}$/;
+
+/** Treat FCM data as untrusted navigation hints and accept only documented pairs. */
+export const parseCommunityPushIntent = (
+  value: unknown,
+): CommunityPushIntent | null => {
+  if (!value || typeof value !== 'object') return null;
+  const data = value as Record<string, unknown>;
+  const notificationId = data.notificationId;
+  const eventType = data.eventType;
+  const routeKey = data.routeKey;
+  const entityId = data.entityId;
+  if (
+    typeof notificationId !== 'string' ||
+    typeof eventType !== 'string' ||
+    typeof routeKey !== 'string' ||
+    typeof entityId !== 'string' ||
+    !RECORD_ID.test(notificationId) ||
+    !RECORD_ID.test(entityId)
+  ) return null;
+  if (!(eventType in COMMUNITY_PUSH_DESTINATIONS)) return null;
+  const typedEvent = eventType as CommunityPushEventType;
+  if (COMMUNITY_PUSH_DESTINATIONS[typedEvent] !== routeKey) return null;
+  return {
+    notificationId,
+    eventType: typedEvent,
+    routeKey: routeKey as CommunityPushRouteKey,
+    entityId,
+  };
+};
+
 const numberValue = (value: unknown) => {
   const parsed = typeof value === 'number' ? value : Number(value);
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;

@@ -32,6 +32,7 @@ import { MembersScreen }             from '../screens/MembersScreen';
 import { MemberDetailScreen }        from '../screens/MemberDetailScreen';
 import { CompanyDetailScreen }       from '../screens/CompanyDetailScreen';
 import { ProfileScreen }             from '../screens/ProfileScreen';
+import { IncidentDetailScreen }      from '../screens/IncidentDetailScreen';
 import { LoginScreen }               from '../screens/LoginScreen';
 import { PaymentWebViewScreen }      from '../screens/PaymentWebViewScreen';
 import { RazorpayCheckoutScreen }    from '../screens/RazorpayCheckoutScreen';
@@ -43,7 +44,7 @@ import {
 import { useApp }                    from '../context/AppContext';
 import { Colors }                    from '../theme';
 import {
-  BillingScreen, BookDayPassScreen, CommonAreasScreen, CommunityScreen, CreateTicketScreen,
+  BillingScreen, BookDayPassScreen, CommonAreasScreen, CommunityScreen, CreateIncidentScreen, CreateTicketScreen,
   EventsScreen, InviteVisitorScreen, LeadsScreen, OnDemandUsersScreen, OperationsHubScreen,
   PrinterRequestsScreen, RfidCardsScreen, MeetingRoomsInventoryScreen,
 } from '../screens/OperationsScreens';
@@ -105,6 +106,8 @@ export type RootStackParamList = {
   MeetingBookingDetailScreen: { bookingId: string };
   InvoicesScreen: undefined;
   ExtendedHoursScreen: undefined;
+  IncidentDetailScreen: { incidentId: string; kind: 'access_safety' | 'building_incident' };
+  CreateIncidentScreen: undefined;
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -191,6 +194,8 @@ export function MainStackNavigator() {
       <Stack.Screen name="MeetingBookingDetailScreen" component={MeetingBookingDetailScreen} />
       <Stack.Screen name="InvoicesScreen"            component={InvoicesScreen} />
       <Stack.Screen name="ExtendedHoursScreen"       component={ExtendedHoursScreen} />
+      <Stack.Screen name="IncidentDetailScreen"      component={IncidentDetailScreen} />
+      <Stack.Screen name="CreateIncidentScreen"      component={CreateIncidentScreen} />
         </>
       )}
     </Stack.Navigator>

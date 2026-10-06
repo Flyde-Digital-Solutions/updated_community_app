@@ -78,7 +78,8 @@ type OperationRoute =
   | 'OnDemandUsersScreen'
   | 'MeetingRoomsInventoryScreen'
   | 'InvoicesScreen'
-  | 'ExtendedHoursScreen';
+  | 'ExtendedHoursScreen'
+  | 'CreateIncidentScreen';
 const EVENT_DATE_OPTIONS = dateOptions();
 const EVENT_TIME_OPTIONS = timeOptions();
 
@@ -410,6 +411,13 @@ const MODULES: Array<{
   //   route: 'InvoicesScreen',
   // },
   {
+    title: 'Incidents',
+    description: 'Create access, safety and building incidents',
+    icon: 'shield-alert-outline',
+    color: Colors.alert,
+    route: 'CreateIncidentScreen',
+  },
+  {
     title: 'Extended Hours',
     description: 'Submit requests for admin review',
     icon: 'clock-plus-outline',
@@ -454,6 +462,127 @@ export function OperationsHubScreen() {
           </TouchableOpacity>
         )}
       />
+    </View>
+  );
+}
+
+export function CreateIncidentScreen() {
+  const navigation = useNavigation<Nav>();
+  const { buildings, members, user } = useApp();
+  const { staff } = useTicketFormOptions();
+  const [kind, setKind] = useState<'access_safety' | 'building_incident'>('access_safety');
+  const [title, setTitle] = useState('');
+  const [urgency, setUrgency] = useState<'normal' | 'high' | 'urgent'>('high');
+  const [buildingId, setBuildingId] = useState(user?.buildingId || '');
+  const [affectedMemberId, setAffectedMemberId] = useState('');
+  const [assignedUserId, setAssignedUserId] = useState('');
+  const [saving, setSaving] = useState(false);
+  const missingFields = [
+    !title.trim() && 'Title',
+    !buildingId && 'Building',
+  ].filter((item): item is string => Boolean(item));
+
+  const create = async () => {
+    if (missingFields.length) return;
+    setSaving(true);
+    try {
+      const response = await apiClient.post<Record<string, unknown>>(Routes.community.incidents, {
+        kind,
+        title: title.trim(),
+        urgency,
+        buildingId,
+        ...(kind === 'access_safety' && affectedMemberId ? { affectedMemberId } : {}),
+        ...(assignedUserId ? { assignedUserIds: [assignedUserId] } : {}),
+      });
+      const data = response.data && typeof response.data === 'object'
+        ? response.data as Record<string, unknown>
+        : response;
+      const incident = data.incident && typeof data.incident === 'object'
+        ? data.incident as Record<string, unknown>
+        : data;
+      const incidentId = String(incident._id || incident.id || '');
+      Alert.alert(
+        'Incident created',
+        urgency === 'normal'
+          ? 'Normal urgency should not generate a push.'
+          : 'The service will queue the matching push event when staging push delivery is enabled.',
+      );
+      if (incidentId) navigation.replace('IncidentDetailScreen', { incidentId, kind });
+      else navigation.goBack();
+    } catch (error) {
+      alertActionError('Incident not created', error);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <View style={styles.root}>
+      <Header title="Create Incident" subtitle="Staging push-event trigger" />
+      <KeyboardSafeScrollView contentContainerStyle={styles.formPage}>
+        <DropdownField
+          label="Incident kind"
+          required
+          value={kind}
+          options={[
+            { value: 'access_safety', label: 'Access & safety' },
+            { value: 'building_incident', label: 'Building incident / closure' },
+          ]}
+          onChange={value => {
+            setKind(value as 'access_safety' | 'building_incident');
+            if (value === 'building_incident') setAffectedMemberId('');
+          }}
+        />
+        <Field label="Title" required value={title} onChangeText={setTitle} placeholder="Use staging-safe text" />
+        <DropdownField
+          label="Urgency"
+          required
+          value={urgency}
+          options={[
+            { value: 'normal', label: 'Normal — negative push test' },
+            { value: 'high', label: 'High — should push' },
+            { value: 'urgent', label: 'Urgent — should push' },
+          ]}
+          onChange={value => setUrgency(value as 'normal' | 'high' | 'urgent')}
+        />
+        <DropdownField
+          label="Building"
+          required
+          value={buildingId}
+          options={buildings.map(building => ({ value: building.id, label: building.name }))}
+          onChange={setBuildingId}
+          placeholder="Select an authorized building"
+          searchable
+        />
+        {kind === 'access_safety' ? (
+          <DropdownField
+            label="Affected member"
+            value={affectedMemberId}
+            options={members.map(member => ({ value: member.id, label: `${member.name}${member.company ? ` · ${member.company}` : ''}` }))}
+            onChange={setAffectedMemberId}
+            placeholder="Optional member push recipient"
+            searchable
+          />
+        ) : null}
+        <DropdownField
+          label="Assigned staff"
+          value={assignedUserId}
+          options={staff}
+          onChange={setAssignedUserId}
+          placeholder="Optional; otherwise building staff"
+          searchable
+        />
+        <Text style={styles.fieldHint}>
+          High and urgent incidents can trigger push. Normal urgency is available for the required negative test.
+        </Text>
+        <TouchableOpacity
+          onPress={missingFields.length ? () => Alert.alert('Mandatory fields missing', `Please complete: ${missingFields.join(', ')}.`) : create}
+          disabled={saving}
+          style={[styles.primaryButton, saving && styles.disabled]}
+        >
+          <Text style={styles.primaryButtonText}>{saving ? 'Creating…' : 'Create Incident'}</Text>
+        </TouchableOpacity>
+      </KeyboardSafeScrollView>
     </View>
   );
 }

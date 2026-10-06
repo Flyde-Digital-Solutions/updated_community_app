@@ -11,6 +11,7 @@ import { useApp } from '../../context/AppContext';
 import { getInitials } from '../../utils/userDisplay';
 import { openExternalLink } from '../../utils/openExternalLink';
 import { CommunityPushPreferenceKey } from '../../types/domain';
+import { usePushNotifications } from '../../context/PushNotificationContext';
 
 const PUSH_PREFERENCES: Array<{
   key: CommunityPushPreferenceKey;
@@ -34,6 +35,8 @@ export function ProfileScreen() {
   const [preferencesLoading, setPreferencesLoading] = useState(true);
   const [savingPreference, setSavingPreference] = useState<CommunityPushPreferenceKey | null>(null);
   const [preferenceError, setPreferenceError] = useState('');
+  const push = usePushNotifications();
+  const [savingPush, setSavingPush] = useState(false);
 
   const loadPreferences = useCallback(async () => {
     setPreferencesLoading(true);
@@ -60,6 +63,18 @@ export function ProfileScreen() {
       setPreferenceError(error instanceof Error ? error.message : 'Preference could not be saved.');
     } finally {
       setSavingPreference(null);
+    }
+  };
+
+  const changePushRegistration = async () => {
+    setSavingPush(true);
+    try {
+      if (push.optedIn && push.registration === 'enabled') await push.disable();
+      else await push.enable();
+    } catch (error) {
+      Alert.alert('Push notifications', error instanceof Error ? error.message : 'Push setup failed.');
+    } finally {
+      setSavingPush(false);
     }
   };
 
@@ -147,6 +162,45 @@ export function ProfileScreen() {
             </View>
             <Icon name="chevron-right" size={16} color={Colors.textMuted} />
           </TouchableOpacity>
+        </View>
+
+        <Text style={styles.sectionLabel}>Push notifications</Text>
+        <Text style={styles.sectionHelp}>
+          Phone permission and service registration are verified separately from category choices.
+        </Text>
+        <View style={styles.card}>
+          <View style={styles.pushStatusRow}>
+            <View style={[styles.infoIconWrap, { backgroundColor: push.registration === 'enabled' ? 'rgba(52,199,89,0.14)' : 'rgba(255,126,21,0.12)' }]}>
+              <Icon
+                name={push.registration === 'enabled' ? 'bell-check-outline' : 'bell-alert-outline'}
+                size={21}
+                color={push.registration === 'enabled' ? Colors.success : Colors.accent300}
+              />
+            </View>
+            <View style={styles.infoText}>
+              <Text style={styles.infoValue}>
+                {push.registration === 'enabled' ? 'Push enabled' : push.registration === 'registering' || push.registration === 'checking' ? 'Checking push setup…' : 'Push not enabled'}
+              </Text>
+              <Text style={styles.infoLabel}>
+                Permission: {push.permission} · Registration: {push.registration}
+              </Text>
+            </View>
+          </View>
+          {push.error ? <Text style={styles.pushError}>{push.error}</Text> : null}
+          <TouchableOpacity
+            onPress={changePushRegistration}
+            disabled={savingPush || push.registration === 'checking' || push.registration === 'registering'}
+            style={[styles.pushButton, (savingPush || push.registration === 'checking' || push.registration === 'registering') && styles.pushButtonDisabled]}
+          >
+            <Text style={styles.pushButtonText}>
+              {savingPush ? 'Please wait…' : push.registration === 'enabled' ? 'Disable Push' : 'Enable Push'}
+            </Text>
+          </TouchableOpacity>
+          {push.registration === 'error' && push.optedIn ? (
+            <TouchableOpacity onPress={push.retry} style={styles.pushRetry}>
+              <Text style={styles.pushRetryText}>Retry registration</Text>
+            </TouchableOpacity>
+          ) : null}
         </View>
 
         <Text style={styles.sectionLabel}>Push notification categories</Text>
@@ -307,6 +361,13 @@ const styles = StyleSheet.create({
   preferenceStatus: { ...Typography.caption, color: Colors.textMuted, paddingHorizontal: Spacing.lg, paddingBottom: Spacing.md },
   preferenceErrorRow: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: Spacing.lg, paddingBottom: Spacing.md },
   preferenceError: { ...Typography.caption, color: Colors.alert, flex: 1 },
+  pushStatusRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md, padding: Spacing.lg, paddingBottom: Spacing.sm },
+  pushError: { ...Typography.caption, color: Colors.alert, paddingHorizontal: Spacing.lg, paddingBottom: Spacing.sm },
+  pushButton: { marginHorizontal: Spacing.lg, marginBottom: Spacing.md, height: 44, borderRadius: BorderRadius.sm, backgroundColor: Colors.accent300, alignItems: 'center', justifyContent: 'center' },
+  pushButtonDisabled: { opacity: 0.5 },
+  pushButtonText: { fontFamily: 'SequelSans-SemiBoldBody', color: Colors.white, fontSize: 14 },
+  pushRetry: { alignSelf: 'center', paddingHorizontal: Spacing.md, paddingBottom: Spacing.md },
+  pushRetryText: { ...Typography.caption, color: Colors.accent300 },
 
   // Logout
   logoutBtn: {
